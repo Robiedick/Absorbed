@@ -1,0 +1,5 @@
+node_modules/
+public/css/styles.css
+.env
+*.log
+.DS_Store

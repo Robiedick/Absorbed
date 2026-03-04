@@ -1,0 +1,12 @@
+{
+  "models": {
+    "rocky":    ["Fossil_Planet.glb","Mars_Red_planet.glb","Rust_Planet.glb","Rusted_Planet.glb","Dark_Metal_Planet.glb","Metallic_Planet.glb","Light_Metal_Planet.glb"],
+    "gas":      ["Dark_Blue_Purple_Green_Slime_Planet.glb","Greenish_Saturn_Ringed_Planet.glb"],
+    "ocean":    ["Blue_Water_beaches_Planet.glb","Earth_Planet.glb","Tropical_EarthLike_Planet.glb","Water_Planet.glb"],
+    "ice":      ["Greenish_Saturn_Ringed_Planet.glb","Light_Metal_Planet.glb","Metallic_Planet.glb"],
+    "volcanic": ["Red_Orange_Planet.glb","Weird_Vulcanic_Planet.glb","Mars_Red_planet.glb"],
+    "crystal":  ["Mystic_Planet.glb","Man_Made_Planet_1.glb","Man_Made_Planet_2.glb","Man_Made_Planet_3.glb"]
+  },
+  "moon_models": ["Dark_Metal_Planet.glb","Fossil_Planet.glb","Rust_Planet.glb","Metallic_Planet.glb","Rusted_Planet.glb"],
+  "star_model":  "Sun.glb"
+}

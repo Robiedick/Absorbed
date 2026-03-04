@@ -1,0 +1,41 @@
+{
+  "name": "absorbed",
+  "version": "1.0.0",
+  "description": "Interactive canvas environment with physics, animation, audio and real-time networking",
+  "main": "server.js",
+  "scripts": {
+    "prestart": "lsof -ti :3000 | xargs kill -9 2>/dev/null; true",
+    "start": "npm run css:build && node server.js",
+    "dev": "npm run css:build && concurrently --names \"SERVER,CSS\" --prefix-colors \"cyan,yellow\" \"nodemon server.js\" \"npm run css:watch\"",
+    "css:build": "tailwindcss -i ./src/styles.css -o ./public/css/styles.css",
+    "css:watch": "tailwindcss -i ./src/styles.css -o ./public/css/styles.css --watch",
+    "sprites": "node scripts/generate-sprites.js"
+  },
+  "dependencies": {
+    "@faker-js/faker": "^9.0.0",
+    "@iconify/iconify": "^3.1.1",
+    "animejs": "^3.2.2",
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.0.0",
+    "express": "^4.19.2",
+    "gsap": "^3.12.5",
+    "howler": "^2.2.4",
+    "jsonwebtoken": "^9.0.2",
+    "lottie-web": "^5.12.2",
+    "matter-js": "^0.19.0",
+    "pixi.js": "^8.0.0",
+    "simplex-noise": "^4.0.3",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.7.5",
+    "spritesmith": "^3.4.1",
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@fortawesome/fontawesome-free": "^6.5.2",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.1.3",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4"
+  }
+}

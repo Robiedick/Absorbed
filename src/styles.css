@@ -1,0 +1,215 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════
+   ABSORBED — SOLAR DOMINION
+   Custom design system
+════════════════════════════════════════════════ */
+
+:root {
+  --space:   #020409;
+  --panel:   rgba(8, 12, 28, 0.88);
+  --border:  rgba(100, 120, 200, 0.18);
+  --glow:    rgba(99, 102, 241, 0.5);
+}
+
+/* Base */
+body { font-family: 'Inter', system-ui, sans-serif; }
+
+/* Background utility */
+.bg-space { background-color: var(--space); }
+
+/* ── Glass panels ─────────────────────────────── */
+.glass-panel {
+  @apply rounded-2xl border;
+  background: var(--panel);
+  border-color: var(--border);
+  box-shadow: 0 0 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(99,102,241,0.08);
+  backdrop-filter: blur(16px);
+}
+
+.glass-side {
+  display: flex;
+  background: rgba(7, 10, 22, 0.82);
+  border-right: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+}
+
+/* ── HUD Bar ──────────────────────────────────── */
+.hud-bar {
+  background: rgba(4, 6, 16, 0.92);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+}
+
+/* ── Resource badges ──────────────────────────── */
+.res-badge {
+  @apply flex items-center gap-1.5 bg-white/5 rounded-lg px-3 py-1 text-sm font-bold;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.res-label { @apply text-xs text-slate-500 font-normal ml-0.5; }
+
+/* ── Buttons ──────────────────────────────────── */
+.btn-primary {
+  @apply rounded-xl text-white font-semibold transition-all duration-200 cursor-pointer text-center;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  border: 1px solid rgba(255,255,255,0.15);
+  padding: 0.5rem 1rem;
+}
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  box-shadow: 0 0 16px var(--glow);
+  transform: translateY(-1px);
+}
+.btn-primary:disabled { @apply opacity-40 cursor-not-allowed; }
+
+.btn-icon {
+  @apply w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.btn-icon:hover { background: rgba(255,255,255,0.1); }
+
+/* ── Auth tabs ────────────────────────────────── */
+.auth-tab {
+  @apply transition-colors cursor-pointer text-slate-400;
+  background: rgba(255,255,255,0.03);
+}
+.auth-tab:hover { @apply text-white; background: rgba(255,255,255,0.06); }
+.auth-tab.active { @apply text-white; background: rgba(99,102,241,0.25); color: #a5b4fc; }
+
+/* ── Inputs ───────────────────────────────────── */
+.input-field {
+  @apply w-full rounded-xl px-4 py-2.5 text-sm text-white outline-none transition-all;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.input-field:focus {
+  border-color: rgba(99,102,241,0.5);
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.15);
+}
+.input-field::placeholder { @apply text-slate-600; }
+
+/* ── Build buttons ────────────────────────────── */
+.build-btn {
+  @apply flex items-center w-full text-left text-sm text-slate-300 rounded-xl px-3 py-2 transition-all cursor-pointer;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.build-btn:hover {
+  background: rgba(99,102,241,0.15);
+  border-color: rgba(99,102,241,0.3);
+  @apply text-white;
+}
+.cost-badge {
+  @apply ml-auto text-xs text-slate-500 font-mono;
+}
+
+/* ── Planet type buttons ──────────────────────── */
+.planet-type-btn {
+  @apply flex flex-col items-center gap-0.5 p-2 rounded-xl cursor-pointer transition-all;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.planet-type-btn:hover {
+  background: rgba(99,102,241,0.15);
+  border-color: rgba(99,102,241,0.35);
+  transform: translateY(-1px);
+}
+
+/* ── Orbit slot buttons ───────────────────────── */
+.orbit-slot-btn {
+  @apply flex items-center w-full text-sm text-slate-300 rounded-xl px-4 py-2.5 transition-all cursor-pointer;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.orbit-slot-btn:hover:not(:disabled) {
+  background: rgba(99,102,241,0.2);
+  border-color: rgba(99,102,241,0.4);
+  @apply text-white;
+}
+
+/* ── Stat boxes ───────────────────────────────── */
+.stat-box {
+  @apply flex flex-col gap-0.5 rounded-lg p-2;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.stat-label { @apply text-slate-500 text-xs; }
+.stat-val   { @apply font-bold text-sm; }
+
+/* ── System info row ──────────────────────────── */
+.sys-info-row {
+  @apply flex items-center justify-between text-xs rounded-lg px-2 py-1.5;
+  background: rgba(255,255,255,0.03);
+}
+
+/* ── Queue items ──────────────────────────────── */
+.queue-item {
+  @apply flex items-center gap-2 text-xs rounded-lg px-2 py-1.5 text-slate-300;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.queue-eta { @apply ml-auto text-indigo-400 font-mono whitespace-nowrap; }
+
+/* ── Galaxy rows ──────────────────────────────── */
+.galaxy-row {
+  @apply flex items-center gap-4 rounded-xl p-4 transition-colors;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.galaxy-row:hover { background: rgba(255,255,255,0.07); }
+
+.btn-attack {
+  @apply text-xs font-bold rounded-lg px-3 py-1.5 transition-all cursor-pointer;
+  background: linear-gradient(135deg, #7f1d1d, #991b1b);
+  border: 1px solid rgba(239,68,68,0.35);
+  color: #fca5a5;
+}
+.btn-attack:hover {
+  background: linear-gradient(135deg, #991b1b, #b91c1c);
+  box-shadow: 0 0 12px rgba(239,68,68,0.4);
+}
+
+/* ── Battle rows ──────────────────────────────── */
+.battle-row {
+  @apply flex items-center gap-3 rounded-xl px-4 py-3 text-sm;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Chat messages ────────────────────────────── */
+.chat-msg {
+  @apply text-xs text-slate-300 leading-relaxed;
+}
+
+/* ── Scrollbar ────────────────────────────────── */
+::-webkit-scrollbar       { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.3); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.5); }
+
+/* ── Admin panel ──────────────────────────────── */
+.admin-tab {
+  @apply px-3 py-1 rounded text-xs font-bold uppercase tracking-widest transition-all;
+  color: rgba(168,85,247,0.6);
+  background: transparent;
+  border: 1px solid transparent;
+}
+.admin-tab:hover {
+  color: #c084fc;
+  border-color: rgba(168,85,247,0.3);
+}
+.admin-tab.active {
+  color: #e879f9;
+  background: rgba(168,85,247,0.15);
+  border-color: rgba(168,85,247,0.4);
+}
+.admin-tab-pane {
+  display: flex;
+  flex-direction: column;
+}
+.admin-tab-pane.hidden { display: none; }
+
+

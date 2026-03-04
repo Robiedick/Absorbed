@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Absorbed — Solar Dominion</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css" />
+  <script src="/vendor/iconify/iconify.min.js" defer></script>
+  <!-- Import map: lets planet3d.js use bare "three" specifiers -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three":          "/vendor/three/build/three.module.js",
+      "three/addons/":  "/vendor/three/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body class="h-full bg-space text-white overflow-hidden select-none">
+
+<!-- ═══════════════════════════════════════════════════════════
+     AUTH SCREEN
+════════════════════════════════════════════════════════════════ -->
+<div id="auth-screen" class="fixed inset-0 z-50 flex items-center justify-center bg-space">
+  <div id="stars-bg" class="absolute inset-0 pointer-events-none"></div>
+
+  <div class="relative z-10 glass-panel w-full max-w-sm mx-4 p-8 flex flex-col gap-6">
+    <!-- Logo -->
+    <div class="text-center">
+      <div class="text-5xl mb-2">✦</div>
+      <h1 class="text-3xl font-black tracking-widest text-indigo-300 uppercase">Absorbed</h1>
+      <p class="text-xs text-slate-400 mt-1 tracking-wider">Solar Dominion</p>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex rounded-lg overflow-hidden border border-white/10">
+      <button id="tab-login"    class="auth-tab active flex-1 py-2 text-sm font-semibold">Login</button>
+      <button id="tab-register" class="auth-tab flex-1 py-2 text-sm font-semibold">Register</button>
+    </div>
+
+    <!-- Form -->
+    <form id="auth-form" class="flex flex-col gap-3" autocomplete="off">
+      <input id="auth-username" type="text"     placeholder="Commander name"
+             class="input-field" maxlength="20" required />
+      <input id="auth-password" type="password" placeholder="Password"
+             class="input-field" minlength="6"  required />
+      <p id="auth-error" class="text-red-400 text-xs hidden"></p>
+      <button type="submit" class="btn-primary py-3 font-bold tracking-wider mt-1">
+        <i class="fa-solid fa-rocket mr-2"></i><span id="auth-btn-label">LAUNCH</span>
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     GAME SCREEN
+════════════════════════════════════════════════════════════════ -->
+<div id="game-screen" class="hidden fixed inset-0">
+
+  <!-- PixiJS Canvas -->
+  <div id="canvas-container" class="absolute inset-0"></div>
+
+  <!-- ── TOP HUD ───────────────────────────────────────────── -->
+  <header class="absolute top-0 left-0 right-0 z-20 flex items-center gap-2 px-4 py-2 hud-bar">
+    <span class="text-indigo-300 font-black tracking-widest mr-2 text-sm uppercase">✦ ABSORBED</span>
+    <div class="flex gap-3 flex-1">
+      <div class="res-badge"><i class="fa-solid fa-bolt text-yellow-400"></i>
+        <span id="res-energy">0</span><span class="res-label">Energy</span></div>
+      <div class="res-badge"><i class="fa-solid fa-cube text-slate-300"></i>
+        <span id="res-matter">0</span><span class="res-label">Matter</span></div>
+      <div class="res-badge"><i class="fa-solid fa-coins text-amber-400"></i>
+        <span id="res-credits">0</span><span class="res-label">Credits</span></div>
+    </div>
+    <div class="flex items-center gap-3 ml-auto">
+      <span class="text-xs text-slate-400"><i class="fa-solid fa-circle text-green-400 text-xs"></i>
+        <span id="online-count">1</span> online</span>
+      <button id="btn-galaxy"  class="btn-icon" title="Galaxy Map"><i class="fa-solid fa-map"></i></button>
+      <button id="btn-battles" class="btn-icon" title="Battle Log"><i class="fa-solid fa-skull-crossbones"></i></button>
+      <button id="btn-chat"    class="btn-icon" title="Comms"><i class="fa-solid fa-satellite-dish"></i></button>
+      <button id="btn-admin"   class="btn-icon text-purple-400 hidden" title="Admin Panel"><i class="fa-solid fa-shield-halved"></i></button>
+      <button id="btn-logout"  class="btn-icon text-red-400" title="Logout"><i class="fa-solid fa-sign-out-alt"></i></button>
+    </div>
+  </header>
+
+  <!-- ── LEFT BUILD PANEL ──────────────────────────────────── -->
+  <aside id="build-panel" class="absolute left-0 top-14 bottom-0 z-20 w-56 glass-side flex flex-col gap-2 p-3 overflow-y-auto">
+    <p class="text-xs text-slate-400 uppercase tracking-widest mb-1 px-1">Construction</p>
+
+    <div class="sys-info-row">
+      <span class="text-slate-300 text-xs">Star</span>
+      <span id="star-info" class="text-yellow-300 text-xs font-bold">Lvl 1 — Yellow Dwarf</span>
+    </div>
+    <div class="sys-info-row">
+      <span class="text-slate-300 text-xs">System</span>
+      <span id="sys-name-label" class="text-indigo-300 text-xs font-semibold truncate max-w-28">—</span>
+    </div>
+
+    <hr class="border-white/10 my-1" />
+
+    <button id="build-upgrade-star" class="build-btn">
+      <i class="fa-solid fa-star text-yellow-400 mr-2"></i>Upgrade Star
+      <span id="star-cost" class="cost-badge"></span>
+    </button>
+
+    <p class="text-xs text-slate-500 uppercase tracking-widest px-1 mt-2">New Planet</p>
+    <div id="planet-type-picker" class="grid grid-cols-2 gap-1">
+      <!-- injected by JS -->
+    </div>
+
+    <hr class="border-white/10 my-2" />
+    <p class="text-xs text-slate-400 uppercase tracking-widest px-1">Queue</p>
+    <div id="build-queue-list" class="flex flex-col gap-1 text-xs"></div>
+  </aside>
+
+  <!-- ── PLANET DETAIL PANEL (right) ──────────────────────── -->
+  <aside id="planet-panel" class="absolute right-0 top-14 bottom-0 z-20 w-60 glass-side flex-col gap-3 p-4 overflow-y-auto hidden">
+    <div class="flex items-center gap-2 mb-1">
+      <div id="planet-icon" class="w-10 h-10 rounded-full border-2 border-white/20 flex items-center justify-center text-xl"></div>
+      <div>
+        <p id="planet-name"  class="font-bold text-sm"></p>
+        <p id="planet-type"  class="text-xs text-slate-400 capitalize"></p>
+      </div>
+      <button id="close-planet" class="ml-auto text-slate-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="grid grid-cols-2 gap-2 text-xs">
+      <div class="stat-box"><span class="stat-label">Level</span><span id="p-level" class="stat-val"></span></div>
+      <div class="stat-box"><span class="stat-label">Orbit</span><span id="p-orbit" class="stat-val"></span></div>
+      <div class="stat-box"><span class="stat-label">⚡/min</span><span id="p-energy" class="stat-val text-yellow-400"></span></div>
+      <div class="stat-box"><span class="stat-label">🧱/min</span><span id="p-matter" class="stat-val text-slate-300"></span></div>
+      <div class="stat-box"><span class="stat-label">💰/min</span><span id="p-credits" class="stat-val text-amber-400"></span></div>
+      <div class="stat-box"><span class="stat-label">⚔ Atk</span><span id="p-atk" class="stat-val text-red-400"></span></div>
+    </div>
+    <button id="btn-upgrade-planet" class="btn-primary text-sm">
+      <i class="fa-solid fa-arrow-up mr-1"></i>Upgrade <span id="upgrade-cost" class="text-xs opacity-70"></span>
+    </button>
+    <p id="upgrade-status" class="text-xs text-center text-slate-400 hidden"></p>
+    <button id="btn-inspect-planet" class="btn-secondary text-sm mt-1">
+      <i class="fa-solid fa-magnifying-glass mr-1"></i>Inspect Planet
+    </button>
+  </aside>
+
+  <!-- ── ORBIT SLOT PICKER (modal) ─────────────────────────── -->
+  <div id="orbit-modal" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div class="glass-panel w-80 p-6 flex flex-col gap-4">
+      <h3 class="font-bold text-indigo-300"><i class="fa-solid fa-ring mr-2"></i>Choose Orbit Slot</h3>
+      <p class="text-xs text-slate-400">Select an empty orbit ring to place your <span id="orbit-modal-type" class="capitalize text-white font-semibold"></span> planet.</p>
+      <div id="orbit-slot-list" class="flex flex-col gap-2"></div>
+      <button id="orbit-cancel" class="text-xs text-slate-500 hover:text-slate-300 mt-2">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ── GALAXY MAP ─────────────────────────────────────────── -->
+  <div id="galaxy-modal" class="hidden fixed inset-0 z-40 bg-black/80 backdrop-blur-sm flex flex-col">
+    <div class="glass-panel max-w-3xl w-full mx-auto my-8 flex flex-col overflow-hidden" style="max-height:85vh">
+      <div class="flex items-center gap-3 px-6 py-4 border-b border-white/10">
+        <i class="fa-solid fa-map text-indigo-400 text-xl"></i>
+        <h2 class="font-black text-lg text-indigo-200 tracking-widest uppercase">Galaxy Map</h2>
+        <button id="galaxy-refresh" class="ml-auto btn-icon text-sm"><i class="fa-solid fa-arrows-rotate"></i></button>
+        <button id="galaxy-close"   class="btn-icon text-red-400"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="galaxy-list" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3"></div>
+    </div>
+  </div>
+
+  <!-- ── BATTLE LOG ─────────────────────────────────────────── -->
+  <div id="battles-modal" class="hidden fixed inset-0 z-40 bg-black/80 backdrop-blur-sm flex flex-col">
+    <div class="glass-panel max-w-2xl w-full mx-auto my-8 flex flex-col overflow-hidden" style="max-height:80vh">
+      <div class="flex items-center gap-3 px-6 py-4 border-b border-white/10">
+        <i class="fa-solid fa-skull-crossbones text-red-400 text-xl"></i>
+        <h2 class="font-black text-lg text-red-300 tracking-widest uppercase">Battle Log</h2>
+        <button id="battles-close" class="ml-auto btn-icon text-red-400"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="battle-log-list" class="flex-1 overflow-y-auto p-4 flex flex-col gap-2"></div>
+    </div>
+  </div>
+
+  <!-- ── CHAT ───────────────────────────────────────────────── -->
+  <div id="chat-panel" class="hidden fixed bottom-0 right-0 z-30 w-72 glass-panel flex flex-col" style="max-height:320px">
+    <div class="flex items-center px-3 py-2 border-b border-white/10 text-xs font-bold text-slate-300">
+      <i class="fa-solid fa-satellite-dish mr-2 text-cyan-400"></i>COMMS
+      <button id="chat-close" class="ml-auto text-slate-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="chat-messages" class="flex-1 overflow-y-auto p-3 flex flex-col gap-1 text-xs min-h-0" style="max-height:220px"></div>
+    <form id="chat-form" class="flex gap-2 p-2 border-t border-white/10">
+      <input id="chat-input" class="input-field flex-1 text-xs py-1 px-2" placeholder="Message galaxy..." maxlength="200" />
+      <button type="submit" class="btn-icon text-xs"><i class="fa-solid fa-paper-plane"></i></button>
+    </form>
+  </div>
+
+  <!-- ── TOAST / NOTIFICATION ──────────────────────────────── -->
+  <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+    <div id="toast-inner" class="glass-panel px-5 py-3 text-sm font-semibold opacity-0 translate-y-4 transition-all duration-300 flex items-center gap-2"></div>
+  </div>
+
+  <!-- ── BATTLE ANIMATION OVERLAY ──────────────────────────── -->
+  <div id="battle-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+    <div class="glass-panel w-full max-w-lg mx-4 p-8 flex flex-col items-center gap-6 text-center">
+      <div id="battle-anim" class="text-7xl mb-2">⚔️</div>
+      <h2 id="battle-title" class="text-2xl font-black uppercase tracking-widest"></h2>
+      <div class="flex gap-6 text-sm">
+        <div class="flex flex-col items-center gap-1">
+          <span class="text-slate-400 text-xs uppercase">Your Power</span>
+          <span id="battle-atk" class="text-3xl font-black text-red-400"></span>
+        </div>
+        <div class="text-slate-500 self-center text-xl">vs</div>
+        <div class="flex flex-col items-center gap-1">
+          <span class="text-slate-400 text-xs uppercase">Enemy Power</span>
+          <span id="battle-def" class="text-3xl font-black text-blue-400"></span>
+        </div>
+      </div>
+      <div id="battle-loot" class="text-sm text-slate-300 hidden">
+        Resources captured: <span id="battle-loot-text" class="text-green-400 font-bold"></span>
+      </div>
+      <button id="battle-dismiss" class="btn-primary px-8 py-3 font-bold tracking-wider mt-2">
+        <i class="fa-solid fa-check mr-2"></i>Continue
+      </button>
+    </div>
+  </div>
+
+  <!-- ── ADMIN PANEL ───────────────────────────────────────── -->
+  <div id="admin-panel" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col">
+    <div class="glass-panel max-w-5xl w-full mx-auto my-6 flex flex-col overflow-hidden" style="max-height:90vh">
+
+      <!-- header -->
+      <div class="flex items-center gap-3 px-6 py-4 border-b border-white/10">
+        <i class="fa-solid fa-shield-halved text-purple-400 text-xl"></i>
+        <h2 class="font-black text-lg text-purple-200 tracking-widest uppercase">Admin Panel</h2>
+        <div class="flex gap-2 ml-6">
+          <button class="admin-tab active" data-tab="logs">Logs</button>
+          <button class="admin-tab" data-tab="users">Users</button>
+          <button class="admin-tab" data-tab="tools">Tools</button>
+          <button class="admin-tab" data-tab="stats">Stats</button>
+        </div>
+        <button id="admin-close" class="ml-auto btn-icon text-red-400"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- ── LOGS TAB ──────────────────────────────────────── -->
+      <div id="admin-tab-logs" class="admin-tab-pane flex-1 overflow-hidden flex flex-col p-4 gap-3">
+        <div class="flex gap-2 items-center flex-wrap">
+          <input id="admin-log-search" class="input-field text-xs py-1 px-2 w-48" placeholder="Search action/detail…" />
+          <select id="admin-log-level" class="input-field text-xs py-1 px-2 w-32">
+            <option value="">All Levels</option>
+            <option value="INFO">INFO</option>
+            <option value="ACTION">ACTION</option>
+            <option value="WARN">WARN</option>
+            <option value="ERROR">ERROR</option>
+            <option value="ADMIN">ADMIN</option>
+          </select>
+          <button id="admin-log-refresh" class="btn-icon text-xs" title="Refresh"><i class="fa-solid fa-arrows-rotate"></i></button>
+          <button id="admin-log-clear" class="btn-icon text-xs text-red-400" title="Clear all logs"><i class="fa-solid fa-trash"></i> Clear</button>
+          <span id="admin-log-count" class="text-xs text-slate-500 ml-auto"></span>
+        </div>
+        <div class="flex-1 overflow-y-auto rounded">
+          <table class="w-full text-xs border-collapse">
+            <thead class="sticky top-0 bg-slate-900/90">
+              <tr class="text-slate-400 text-left">
+                <th class="py-1 px-2 w-36">Time</th>
+                <th class="py-1 px-2 w-24">User</th>
+                <th class="py-1 px-2 w-20">Level</th>
+                <th class="py-1 px-2 w-36">Action</th>
+                <th class="py-1 px-2">Detail</th>
+              </tr>
+            </thead>
+            <tbody id="admin-log-tbody" class="divide-y divide-white/5"></tbody>
+          </table>
+        </div>
+        <div class="flex gap-2 items-center text-xs text-slate-400">
+          <button id="admin-log-prev" class="btn-icon text-xs"><i class="fa-solid fa-chevron-left"></i></button>
+          <span id="admin-log-page">Page 1</span>
+          <button id="admin-log-next" class="btn-icon text-xs"><i class="fa-solid fa-chevron-right"></i></button>
+        </div>
+      </div>
+
+      <!-- ── USERS TAB ─────────────────────────────────────── -->
+      <div id="admin-tab-users" class="admin-tab-pane hidden flex-1 overflow-hidden flex flex-col p-4 gap-3">
+        <div class="flex gap-2 items-center">
+          <button id="admin-users-refresh" class="btn-icon text-xs"><i class="fa-solid fa-arrows-rotate"></i> Refresh</button>
+        </div>
+        <div class="flex-1 overflow-y-auto rounded">
+          <table class="w-full text-xs border-collapse">
+            <thead class="sticky top-0 bg-slate-900/90">
+              <tr class="text-slate-400 text-left">
+                <th class="py-1 px-2">User</th>
+                <th class="py-1 px-2">System</th>
+                <th class="py-1 px-2">⚡E</th>
+                <th class="py-1 px-2">🧱M</th>
+                <th class="py-1 px-2">💰C</th>
+                <th class="py-1 px-2">Planets</th>
+                <th class="py-1 px-2">Joined</th>
+                <th class="py-1 px-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="admin-users-tbody" class="divide-y divide-white/5"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── TOOLS TAB ─────────────────────────────────────── -->
+      <div id="admin-tab-tools" class="admin-tab-pane hidden flex-1 overflow-y-auto p-4 grid grid-cols-2 gap-4 content-start">
+
+        <!-- Self reset -->
+        <div class="glass-side rounded p-4 flex flex-col gap-2">
+          <h4 class="font-bold text-purple-300 text-xs uppercase tracking-widest"><i class="fa-solid fa-rotate-left mr-1"></i>Reset My Account</h4>
+          <p class="text-xs text-slate-400">Wipe all your planets and reset resources to starter values (E:500 M:500 C:250).</p>
+          <button id="admin-reset-self" class="btn-primary text-xs py-1 mt-1">Reset My Account</button>
+        </div>
+
+        <!-- Complete queue -->
+        <div class="glass-side rounded p-4 flex flex-col gap-2">
+          <h4 class="font-bold text-purple-300 text-xs uppercase tracking-widest"><i class="fa-solid fa-bolt mr-1"></i>Force Complete Queue</h4>
+          <p class="text-xs text-slate-400">Instantly finish all build queue items for a user (or self).</p>
+          <div class="flex gap-2 mt-1">
+            <input id="admin-queue-uid" class="input-field text-xs py-1 px-2 flex-1" placeholder="User ID (blank=self)" type="number" />
+            <button id="admin-complete-queue" class="btn-primary text-xs py-1 px-3">Go</button>
+          </div>
+        </div>
+
+        <!-- Grant resources -->
+        <div class="glass-side rounded p-4 flex flex-col gap-2">
+          <h4 class="font-bold text-purple-300 text-xs uppercase tracking-widest"><i class="fa-solid fa-plus mr-1"></i>Grant Resources</h4>
+          <div class="flex gap-1 mt-1">
+            <input id="admin-grant-uid"     class="input-field text-xs py-1 px-2 w-16" placeholder="UID" type="number" />
+            <input id="admin-grant-energy"  class="input-field text-xs py-1 px-2 w-16" placeholder="⚡E" type="number" />
+            <input id="admin-grant-matter"  class="input-field text-xs py-1 px-2 w-16" placeholder="🧱M" type="number" />
+            <input id="admin-grant-credits" class="input-field text-xs py-1 px-2 w-16" placeholder="💰C" type="number" />
+            <button id="admin-grant-btn" class="btn-primary text-xs py-1 px-3">Grant</button>
+          </div>
+        </div>
+
+        <!-- Set resources -->
+        <div class="glass-side rounded p-4 flex flex-col gap-2">
+          <h4 class="font-bold text-purple-300 text-xs uppercase tracking-widest"><i class="fa-solid fa-pen mr-1"></i>Set Resources</h4>
+          <div class="flex gap-1 mt-1">
+            <input id="admin-set-uid"     class="input-field text-xs py-1 px-2 w-16" placeholder="UID" type="number" />
+            <input id="admin-set-energy"  class="input-field text-xs py-1 px-2 w-16" placeholder="⚡E" type="number" />
+            <input id="admin-set-matter"  class="input-field text-xs py-1 px-2 w-16" placeholder="🧱M" type="number" />
+            <input id="admin-set-credits" class="input-field text-xs py-1 px-2 w-16" placeholder="💰C" type="number" />
+            <button id="admin-set-btn" class="btn-primary text-xs py-1 px-3">Set</button>
+          </div>
+        </div>
+
+        <!-- Add planet -->
+        <div class="glass-side rounded p-4 flex flex-col gap-2">
+          <h4 class="font-bold text-purple-300 text-xs uppercase tracking-widest"><i class="fa-solid fa-circle-plus mr-1"></i>Add Planet</h4>
+          <div class="flex gap-1 flex-wrap mt-1">
+            <input id="admin-add-uid"   class="input-field text-xs py-1 px-2 w-16" placeholder="UID" type="number" />
+            <select id="admin-add-type" class="input-field text-xs py-1 px-2">
+              <option value="rocky">Rocky</option>
+              <option value="gas">Gas</option>
+              <option value="ocean">Ocean</option>
+              <option value="ice">Ice</option>
+              <option value="volcanic">Volcanic</option>
+              <option value="crystal">Crystal</option>
+            </select>
+            <input id="admin-add-orbit" class="input-field text-xs py-1 px-2 w-16" placeholder="Orbit 0-7" type="number" min="0" max="7" />
+            <input id="admin-add-level" class="input-field text-xs py-1 px-2 w-16" placeholder="Level" type="number" min="1" value="1" />
+            <button id="admin-add-planet-btn" class="btn-primary text-xs py-1 px-3">Add</button>
+          </div>
+        </div>
+
+        <!-- Remove planet -->
+        <div class="glass-side rounded p-4 flex flex-col gap-2">
+          <h4 class="font-bold text-purple-300 text-xs uppercase tracking-widest"><i class="fa-solid fa-circle-minus mr-1"></i>Remove Planet</h4>
+          <div class="flex gap-2 mt-1">
+            <input id="admin-remove-pid" class="input-field text-xs py-1 px-2 flex-1" placeholder="Planet ID" type="number" />
+            <button id="admin-remove-planet-btn" class="btn-primary text-xs py-1 px-3 bg-red-900/50 border-red-500/30">Remove</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── STATS TAB ──────────────────────────────────────── -->
+      <div id="admin-tab-stats" class="admin-tab-pane hidden flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+        <div id="admin-stats-grid" class="grid grid-cols-3 gap-3"></div>
+        <div>
+          <p class="text-xs text-slate-400 uppercase tracking-widest mb-2">Recent Actions</p>
+          <div id="admin-stats-recent" class="flex flex-col gap-1 text-xs"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── PLANET VIEWER ────────────────────────────────────── -->
+  <div id="planet-viewer" class="hidden fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center">
+    <div class="glass-panel flex overflow-hidden mx-4" style="max-width:900px;width:100%;max-height:92vh">
+
+      <!-- 3D canvas (wrapper div — a fresh <canvas> is inserted per open to avoid dead GL context) -->
+      <div id="planet-viewer-canvas-wrap" class="relative flex-1" style="min-height:400px;min-width:0"></div>
+
+      <!-- Stats sidebar -->
+      <div class="w-72 flex flex-col gap-4 p-5 border-l border-white/10 overflow-y-auto">
+        <div class="flex items-center gap-3">
+          <div id="pv-icon" class="w-10 h-10 flex items-center justify-center text-2xl"></div>
+          <div class="flex-1 min-w-0">
+            <h2 id="pv-name" class="font-black text-base truncate"></h2>
+            <p id="pv-type" class="text-xs text-slate-400 capitalize"></p>
+          </div>
+          <button id="planet-viewer-close" class="btn-icon text-red-400 shrink-0"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="stat-box"><span class="stat-label">Level</span><span id="pv-level" class="stat-val"></span></div>
+          <div class="stat-box"><span class="stat-label">Orbit</span><span id="pv-orbit" class="stat-val"></span></div>
+          <div class="stat-box"><span class="stat-label">⚡/min</span><span id="pv-energy" class="stat-val text-yellow-400"></span></div>
+          <div class="stat-box"><span class="stat-label">🧱/min</span><span id="pv-matter" class="stat-val text-slate-300"></span></div>
+          <div class="stat-box"><span class="stat-label">💰/min</span><span id="pv-credits" class="stat-val text-amber-400"></span></div>
+          <div class="stat-box"><span class="stat-label">⚔ Atk</span><span id="pv-atk" class="stat-val text-red-400"></span></div>
+        </div>
+
+        <div class="text-xs flex flex-col gap-1">
+          <h3 class="text-slate-400 font-semibold uppercase tracking-wider text-[10px] mb-1">Physical</h3>
+          <div class="flex justify-between"><span class="text-slate-400">Self Rotation</span><span id="pv-self-rot" class="text-white"></span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Orbital Speed</span><span id="pv-orb-spd" class="text-white"></span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Size Scale</span><span id="pv-size" class="text-white"></span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Moons</span><span id="pv-moons" class="text-white"></span></div>
+        </div>
+
+        <div id="pv-moon-list" class="flex flex-col gap-1 text-xs hidden">
+          <h3 class="text-slate-400 font-semibold uppercase tracking-wider text-[10px] mb-1">Moons</h3>
+        </div>
+
+        <div class="mt-auto pt-3 border-t border-white/10">
+          <button id="btn-destroy-planet" class="w-full text-sm font-semibold rounded-xl px-3 py-2 bg-red-900/40 border border-red-700/50 text-red-400 hover:bg-red-800/60 hover:text-red-300 transition-all">
+            <i class="fa-solid fa-skull mr-2"></i>Destroy Planet
+          </button>
+          <p id="pv-destroy-status" class="text-xs text-center text-red-400 mt-2 hidden">💥 Detonating…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /game-screen -->
+
+<!-- ── VENDOR SCRIPTS ────────────────────────────────────────── -->
+<script src="/vendor/pixi/pixi.min.js"></script>
+<script src="/vendor/matter/matter.min.js"></script>
+<script src="/vendor/gsap/gsap.min.js"></script>
+<script src="/vendor/anime/anime.min.js"></script>
+<script src="/vendor/lottie/lottie.min.js"></script>
+<script src="/vendor/howler/howler.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
