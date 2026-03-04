@@ -1,4 +1,5 @@
 // server.js — Absorbed main server
+require('dotenv').config();
 const express    = require('express');
 const http       = require('http');
 const { Server } = require('socket.io');

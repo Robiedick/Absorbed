@@ -19,6 +19,15 @@ export class SolarSystemRenderer {
     this._saveCounter = 0;
     this._world       = null;   // zoomable container (orbits + planets + star + fx)
     this._worldScale  = 1.0;
+    // Pan state
+    this._panOffsetX  = 0;
+    this._panOffsetY  = 0;
+    this._isPanning   = false;
+    this._panStartX   = 0;
+    this._panStartY   = 0;
+    this._panOX       = 0;
+    this._panOY       = 0;
+    this._hasDragged  = false;
   }
 
   async init() {
@@ -77,6 +86,31 @@ export class SolarSystemRenderer {
       this._world.scale.set(this._worldScale);
     }, { passive: false });
 
+    // Left-click drag to pan
+    const cv = this.app.canvas;
+    cv.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      this._isPanning  = true;
+      this._hasDragged = false;
+      this._panStartX  = e.clientX;
+      this._panStartY  = e.clientY;
+      this._panOX      = this._panOffsetX;
+      this._panOY      = this._panOffsetY;
+    });
+    cv.addEventListener('pointermove', (e) => {
+      if (!this._isPanning) return;
+      const dx = e.clientX - this._panStartX;
+      const dy = e.clientY - this._panStartY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) this._hasDragged = true;
+      if (!this._hasDragged) return;
+      this._panOffsetX = this._panOX + dx;
+      this._panOffsetY = this._panOY + dy;
+      this._world.position.set(this.cx + this._panOffsetX, this.cy + this._panOffsetY);
+    });
+    const endPan = () => { this._isPanning = false; };
+    cv.addEventListener('pointerup',     endPan);
+    cv.addEventListener('pointercancel', endPan);
+
     this.app.ticker.add(this._tick.bind(this));
     window.addEventListener('resize', () => {
       this.app.renderer.resize(window.innerWidth, window.innerHeight);
@@ -101,7 +135,7 @@ export class SolarSystemRenderer {
   // always scales around the star rather than the screen origin.
   _updateWorldPivot() {
     this._world.pivot.set(this.cx, this.cy);
-    this._world.position.set(this.cx, this.cy);
+    this._world.position.set(this.cx + this._panOffsetX, this.cy + this._panOffsetY);
   }
 
   // ── Orbit angle persistence ─────────────────────────────────────────────────
@@ -152,50 +186,72 @@ export class SolarSystemRenderer {
     this._layers.stars.addChild(g);
   }
 
+  // Builds a PIXI Texture with a smooth radial gradient glow — pure 2D canvas,
+  // perfectly smooth at any zoom level, zero pixelation.
+  _makeStarGlowTexture(sizePx, starType) {
+    const STOPS = {
+      yellow_dwarf: ['rgba(255,240,120,0.95)', 'rgba(255,180,20,0.72)', 'rgba(255,100,0,0.38)', 'rgba(180,60,0,0.12)', 'rgba(100,30,0,0.03)', 'rgba(0,0,0,0)'],
+      red_dwarf:    ['rgba(255,140,80,0.95)',  'rgba(220,60,10,0.72)',  'rgba(160,20,0,0.38)',  'rgba(100,10,0,0.12)',  'rgba(60,5,0,0.03)',   'rgba(0,0,0,0)'],
+      blue_giant:   ['rgba(180,220,255,0.95)', 'rgba(80,150,255,0.72)', 'rgba(30,80,220,0.38)', 'rgba(10,40,140,0.12)', 'rgba(5,20,80,0.03)',  'rgba(0,0,0,0)'],
+      white_dwarf:  ['rgba(240,240,255,0.95)', 'rgba(200,200,255,0.72)','rgba(160,160,240,0.38)','rgba(100,100,200,0.12)','rgba(60,60,150,0.03)','rgba(0,0,0,0)'],
+      neutron:      ['rgba(100,255,220,0.95)', 'rgba(0,200,160,0.72)',  'rgba(0,120,100,0.38)', 'rgba(0,60,50,0.12)',   'rgba(0,30,25,0.03)',  'rgba(0,0,0,0)'],
+    };
+    const stops = STOPS[starType] || STOPS.yellow_dwarf;
+    const c     = document.createElement('canvas');
+    c.width = c.height = sizePx;
+    const ctx  = c.getContext('2d');
+    const half = sizePx / 2;
+    const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
+    [0, 0.10, 0.28, 0.52, 0.76, 1.0].forEach((pos, i) => grad.addColorStop(pos, stops[i]));
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, sizePx, sizePx);
+    return PIXI.Texture.from(c);
+  }
+
   // ── Star (centre) ────────────────────────────────────────────────────────────
   _buildStar(starType, level) {
+    planet3d.registerStar();  // idempotent — no-op if already registered
     this._layers.star.removeChildren();
-    const colors = {
-      yellow_dwarf: { core: 0xFFE066, glow: 0xFF9900, corona: 0xFFCC00 },
-      red_dwarf:    { core: 0xFF5533, glow: 0xCC2200, corona: 0xFF7744 },
-      blue_giant:   { core: 0x88CCFF, glow: 0x3366FF, corona: 0xAADDFF },
-      white_dwarf:  { core: 0xEEEEFF, glow: 0xCCCCFF, corona: 0xFFFFFF },
-      neutron:      { core: 0x00FFEE, glow: 0x0066CC, corona: 0x00FFCC },
-    };
-    const c = colors[starType] || colors.yellow_dwarf;
-    // Scale star size relative to available screen space
-    const baseR = Math.max(28, this._maxOrbitR * 0.09) + level * 3;
 
-    // Corona outer glow (multiple transparent circles)
-    for (let i = 4; i >= 1; i--) {
-      const gfx = new PIXI.Graphics();
-      gfx.circle(0, 0, baseR + i * 14).fill({ color: c.corona, alpha: 0.04 * i });
-      this._layers.star.addChild(gfx);
+    const baseR = Math.max(32, this._maxOrbitR * 0.10) + level * 3;
+    const tex   = planet3d.getStarTexture();
+
+    // Radial gradient glow — drawn on a 2D canvas so it's perfectly smooth at any zoom
+    const glowTex    = this._makeStarGlowTexture(1024, starType);
+    const glowSprite = new PIXI.Sprite(glowTex);
+    glowSprite.width = glowSprite.height = baseR * 7.5;
+    glowSprite.anchor.set(0.5);
+    this._layers.star.addChild(glowSprite);
+
+    if (tex) {
+      // Crisp 3D body on top
+      const body = new PIXI.Sprite(tex);
+      body.width = body.height = baseR * 2.4;
+      body.anchor.set(0.5);
+      const cm = new PIXI.ColorMatrixFilter();
+      cm.brightness(2.0, false);
+      body.filters = [cm];
+      this._layers.star.addChild(body);
+    } else {
+      // 2D fallback
+      const FLAT = {
+        yellow_dwarf: { core: 0xFFE066 },
+        red_dwarf:    { core: 0xFF5533 },
+        blue_giant:   { core: 0x88CCFF },
+        white_dwarf:  { core: 0xEEEEFF },
+        neutron:      { core: 0x00FFEE },
+      };
+      const core = new PIXI.Graphics();
+      core.circle(0, 0, baseR).fill({ color: (FLAT[starType] || FLAT.yellow_dwarf).core });
+      this._layers.star.addChild(core);
     }
-    // Glow ring
-    const glow = new PIXI.Graphics();
-    glow.circle(0, 0, baseR + 10).fill({ color: c.glow, alpha: 0.25 });
-    this._layers.star.addChild(glow);
-    // Core
-    const core = new PIXI.Graphics();
-    core.circle(0, 0, baseR).fill({ color: c.core, alpha: 1 });
-    this._layers.star.addChild(core);
-    // Bright centre spot
-    const spot = new PIXI.Graphics();
-    spot.circle(0, 0, baseR * 0.45).fill({ color: 0xFFFFFF, alpha: 0.55 });
-    this._layers.star.addChild(spot);
 
     this._layers.star.x = this.cx;
     this._layers.star.y = this.cy;
-
-    // GSAP pulsing corona
     this._layers.star.scale.set(1);
     gsap.to(this._layers.star.scale, {
-      x: 1.06, y: 1.06,
-      duration: 1.8 + Math.random(),
-      repeat: -1,
-      yoyo: true,
-      ease: 'sine.inOut',
+      x: 1.06, y: 1.06, duration: 2.2 + Math.random(),
+      repeat: -1, yoyo: true, ease: 'sine.inOut',
     });
   }
 
@@ -238,7 +294,7 @@ export class SolarSystemRenderer {
   }
 
   _orbitRadius(index) {
-    const innerR  = this._maxOrbitR * 0.13;  // innermost orbit
+    const innerR  = this._maxOrbitR * 0.22;  // innermost orbit — keep clear of the star
     const spacing = (this._maxOrbitR - innerR) / 7;
     return innerR + index * spacing;
   }
@@ -272,7 +328,8 @@ export class SolarSystemRenderer {
     if (tex) {
       // ── 3D path – texture is a live canvas that Three.js updates each frame ──
       const sizeScale = planet.size_scale != null ? Number(planet.size_scale) : 1.0;
-      const size      = Math.max(20, (9 + planet.level * 2.2) * 2.4 * sizeScale);
+      // Cap size so even large sizeScale planets stay within orbit ring spacing
+      const size      = Math.min(72, Math.max(20, (9 + planet.level * 2.2) * 2.4 * sizeScale));
 
       const wrap = new PIXI.Container();
       const sprite = new PIXI.Sprite(tex);
@@ -301,6 +358,10 @@ export class SolarSystemRenderer {
       }
 
       wrap.eventMode = 'static'; wrap.cursor = 'pointer';
+      // Explicit hit area large enough to include the level badge, moon dots,
+      // and the 1.2× hover-scale without anything getting clipped.
+      const pad = size * 0.8;
+      wrap.hitArea = new PIXI.Rectangle(-size / 2 - pad, -size / 2 - pad, size + pad * 2, size + pad * 2 + 16);
       wrap.on('pointerover', () => gsap.to(wrap.scale, { x: 1.2, y: 1.2, duration: 0.2 }));
       wrap.on('pointerout',  () => gsap.to(wrap.scale, { x: 1,   y: 1,   duration: 0.2 }));
       wrap.on('pointertap',  () => this.onPlanetClick(planet));
@@ -415,9 +476,13 @@ export class SolarSystemRenderer {
   // Explosion at a specific planet's current screen position, then calls onDone.
   spawnPlanetExplosion(planetId, onDone) {
     const ctr = this.planetGfx.get(planetId);
-    // _layers.fx lives inside _world, so use world-local coords (= ctr.x / ctr.y)
+    // _layers.fx lives inside _world, so use world-local coords for PixiJS particles
     const x   = ctr ? ctr.x : this.cx;
     const y   = ctr ? ctr.y : this.cy;
+    // CSS screen coords for the Three.js GLB overlay
+    const screenX = (x - this.cx) * this._worldScale + this.cx;
+    const screenY = (y - this.cy) * this._worldScale + this.cy;
+    planet3d.spawnExplosionAt(screenX, screenY);
 
     // Fade + scale-up the planet sprite so it looks like it's blowing apart
     if (ctr) {

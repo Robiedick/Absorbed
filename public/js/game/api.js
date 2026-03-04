@@ -35,6 +35,8 @@ export const api = {
   getGalaxy:        ()          => api.get('/api/game/galaxy'),
   battle:           (uid)       => api.post('/api/game/battle',           { defender_user_id: uid }),
   getBattleLog:     ()          => api.get('/api/game/battle-log'),
+  renameSystem:     (name)      => api._req('PATCH', '/api/game/rename-system', { name }),
+  renamePlanet:     (id, name)  => api._req('PATCH', '/api/game/rename-planet', { planet_id: id, name }),
 
   // Admin
   adminGetLogs:        (p)              => api.get(`/api/admin/logs?${new URLSearchParams(p)}`),

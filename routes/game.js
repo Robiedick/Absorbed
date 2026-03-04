@@ -5,6 +5,7 @@ const jwt     = require('jsonwebtoken');
 const { faker } = require('@faker-js/faker');
 const { db, tickResources, calcPower, BUILD_CONFIG } = require('../db/database');
 const { writeLog, LEVELS } = require('../db/logger');
+const { councilLetter } = require('../services/openrouter');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'absorbed_super_secret_2026';
@@ -15,7 +16,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'absorbed_super_secret_2026';
 const VISUAL_MODEL_POOLS = {
   rocky:    ['Fossil_Planet.glb','Mars_Red_planet.glb','Rust_Planet.glb','Rusted_Planet.glb','Dark_Metal_Planet.glb','Metallic_Planet.glb','Light_Metal_Planet.glb'],
   gas:      ['Dark_Blue_Purple_Green_Slime_Planet.glb','Greenish_Saturn_Ringed_Planet.glb'],
-  ocean:    ['Blue_Water_beaches_Planet.glb','Earth_Planet.glb','Tropical_EarthLike_Planet.glb','Water_Planet.glb'],
+  ocean:    ['Blue_Water_beaches_Planet.glb','Tropical_EarthLike_Planet.glb','Water_Planet.glb'],
   ice:      ['Greenish_Saturn_Ringed_Planet.glb','Light_Metal_Planet.glb','Metallic_Planet.glb'],
   volcanic: ['Red_Orange_Planet.glb','Weird_Vulcanic_Planet.glb','Mars_Red_planet.glb'],
   crystal:  ['Mystic_Planet.glb','Man_Made_Planet_1.glb','Man_Made_Planet_2.glb','Man_Made_Planet_3.glb'],
@@ -139,7 +140,7 @@ router.post('/build-planet', auth, (req, res) => {
 });
 
 // ── POST /api/game/upgrade-planet ────────────────────────────────────────────
-router.post('/upgrade-planet', auth, (req, res) => {
+router.post('/upgrade-planet', auth, async (req, res) => {
   const { planet_id } = req.body;
 
   const sys    = getUserSys(req.user.id);
@@ -152,7 +153,7 @@ router.post('/upgrade-planet', auth, (req, res) => {
   ).get(sys.id, planet.id);
   if (inQueue) return res.status(409).json({ error: 'Already upgrading this planet.' });
 
-  const cfg = BUILD_CONFIG.upgrade_planet(planet.level);
+  const cfg     = BUILD_CONFIG.upgrade_planet(planet.level);
   const updated = tickResources(sys.id);
 
   if (updated.matter < cfg.cost.matter || updated.energy < cfg.cost.energy || updated.credits < cfg.cost.credits) {
@@ -160,6 +161,28 @@ router.post('/upgrade-planet', auth, (req, res) => {
     return res.status(400).json({ error: 'Not enough resources.', need: cfg.cost });
   }
 
+  // ── Ultimate Universe Council verdict (50 / 50) ───────────────────────────
+  const verdict = Math.random() < 0.5 ? 'approved' : 'denied';
+
+  // Gather solar system context for the AI letter
+  const allPlanets = db.prepare('SELECT name, type, level FROM planets WHERE solar_system_id = ?').all(sys.id);
+  let letter = '';
+  try {
+    letter = await councilLetter(verdict, planet, updated, allPlanets);
+  } catch (err) {
+    // If AI call fails, fall back to a generic message so the game still works
+    console.error('[Council] OpenRouter error:', err.message);
+    letter = verdict === 'approved'
+      ? `By decree of the Ultimate Universe Council, the upgrade of ${planet.name} is hereby approved.`
+      : `By decree of the Ultimate Universe Council, the upgrade of ${planet.name} is hereby denied.`;
+  }
+
+  if (verdict === 'denied') {
+    glog(req, 'UPGRADE_PLANET_DENIED', `Council denied upgrade of ${planet.name} (lv${planet.level}→${planet.level + 1})`, LEVELS.ACTION, { planet_id: planet.id });
+    return res.json({ verdict: 'denied', letter });
+  }
+
+  // ── Approved: deduct resources and queue ─────────────────────────────────
   db.prepare(`
     UPDATE solar_systems SET matter = matter - ?, energy = energy - ?, credits = credits - ?
     WHERE id = ?
@@ -171,8 +194,8 @@ router.post('/upgrade-planet', auth, (req, res) => {
     VALUES (?, ?, 'upgrade_planet', '{}', ?)
   `).run(sys.id, planet.id, completeAt);
 
-  glog(req, 'UPGRADE_PLANET', `Upgrading ${planet.name} → lv${planet.level + 1} (eta ${cfg.time}s)`, LEVELS.ACTION, { planet_id: planet.id, planet_name: planet.name, new_level: planet.level + 1, cost: cfg.cost });
-  res.json({ message: `Upgrading ${planet.name} to level ${planet.level + 1}.`, complete_at: completeAt, cost: cfg.cost });
+  glog(req, 'UPGRADE_PLANET', `Council approved: upgrading ${planet.name} → lv${planet.level + 1} (eta ${cfg.time}s)`, LEVELS.ACTION, { planet_id: planet.id, planet_name: planet.name, new_level: planet.level + 1, cost: cfg.cost });
+  res.json({ verdict: 'approved', letter, message: `Upgrading ${planet.name} to level ${planet.level + 1}.`, complete_at: completeAt, cost: cfg.cost });
 });
 
 // ── POST /api/game/upgrade-star ───────────────────────────────────────────────
@@ -373,6 +396,34 @@ router.get('/battle-log', auth, (req, res) => {
   `).all(req.user.id, req.user.id);
 
   res.json({ log });
+});
+
+// ── PATCH /api/game/rename-system ────────────────────────────────────────────
+router.patch('/rename-system', auth, (req, res) => {
+  const { name } = req.body;
+  if (!name || typeof name !== 'string' || !name.trim())
+    return res.status(400).json({ error: 'Name is required.' });
+  const trimmed = name.trim().slice(0, 40);
+  const sys = getUserSys(req.user.id);
+  if (!sys) return res.status(404).json({ error: 'No solar system.' });
+  db.prepare('UPDATE solar_systems SET name = ? WHERE id = ?').run(trimmed, sys.id);
+  glog(req, 'RENAME_SYSTEM', `Renamed solar system to "${trimmed}"`);
+  res.json({ name: trimmed });
+});
+
+// ── PATCH /api/game/rename-planet ─────────────────────────────────────────────
+router.patch('/rename-planet', auth, (req, res) => {
+  const { planet_id, name } = req.body;
+  if (!name || typeof name !== 'string' || !name.trim())
+    return res.status(400).json({ error: 'Name is required.' });
+  const trimmed = name.trim().slice(0, 40);
+  const sys = getUserSys(req.user.id);
+  if (!sys) return res.status(404).json({ error: 'No solar system.' });
+  const planet = db.prepare('SELECT * FROM planets WHERE id = ? AND solar_system_id = ?').get(planet_id, sys.id);
+  if (!planet) return res.status(404).json({ error: 'Planet not found.' });
+  db.prepare('UPDATE planets SET name = ? WHERE id = ?').run(trimmed, planet_id);
+  glog(req, 'RENAME_PLANET', `Renamed planet ${planet_id} to "${trimmed}"`);
+  res.json({ name: trimmed });
 });
 
 // ── DELETE /api/game/planet/:id ────────────────────────────────────────────

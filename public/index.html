@@ -93,7 +93,10 @@
     </div>
     <div class="sys-info-row">
       <span class="text-slate-300 text-xs">System</span>
-      <span id="sys-name-label" class="text-indigo-300 text-xs font-semibold truncate max-w-28">—</span>
+      <span class="flex items-center gap-1 min-w-0">
+        <span id="sys-name-label" class="text-indigo-300 text-xs font-semibold truncate max-w-24">—</span>
+        <button id="btn-rename-system" class="text-slate-500 hover:text-indigo-300 text-[11px] shrink-0" title="Rename system"><i class="fa-solid fa-pencil"></i></button>
+      </span>
     </div>
 
     <hr class="border-white/10 my-1" />
@@ -117,8 +120,11 @@
   <aside id="planet-panel" class="absolute right-0 top-14 bottom-0 z-20 w-60 glass-side flex-col gap-3 p-4 overflow-y-auto hidden">
     <div class="flex items-center gap-2 mb-1">
       <div id="planet-icon" class="w-10 h-10 rounded-full border-2 border-white/20 flex items-center justify-center text-xl"></div>
-      <div>
-        <p id="planet-name"  class="font-bold text-sm"></p>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-1">
+          <p id="planet-name"  class="font-bold text-sm truncate"></p>
+          <button id="btn-rename-panel-planet" class="text-slate-500 hover:text-indigo-300 text-[11px] shrink-0" title="Rename planet"><i class="fa-solid fa-pencil"></i></button>
+        </div>
         <p id="planet-type"  class="text-xs text-slate-400 capitalize"></p>
       </div>
       <button id="close-planet" class="ml-auto text-slate-500 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
@@ -393,7 +399,10 @@
         <div class="flex items-center gap-3">
           <div id="pv-icon" class="w-10 h-10 flex items-center justify-center text-2xl"></div>
           <div class="flex-1 min-w-0">
-            <h2 id="pv-name" class="font-black text-base truncate"></h2>
+            <div class="flex items-center gap-1">
+              <h2 id="pv-name" class="font-black text-base truncate"></h2>
+              <button id="btn-rename-viewer-planet" class="text-slate-500 hover:text-indigo-300 text-[11px] shrink-0" title="Rename planet"><i class="fa-solid fa-pencil"></i></button>
+            </div>
             <p id="pv-type" class="text-xs text-slate-400 capitalize"></p>
           </div>
           <button id="planet-viewer-close" class="btn-icon text-red-400 shrink-0"><i class="fa-solid fa-xmark"></i></button>
@@ -431,6 +440,57 @@
   </div>
 
 </div><!-- /game-screen -->
+
+<!-- ── ULTIMATE UNIVERSE COUNCIL MODAL ──────────────────────── -->
+<div id="council-modal" class="hidden fixed inset-0 z-[60] bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
+  <div class="flex flex-col sm:flex-row gap-0 overflow-hidden rounded-2xl border border-white/10 shadow-2xl" style="max-width:780px;width:100%;max-height:92vh">
+
+    <!-- Avatar panel -->
+    <div id="council-avatar-panel" class="relative flex-shrink-0 flex items-end justify-center sm:w-56 min-h-48 sm:min-h-0 bg-gradient-to-b from-indigo-950 to-black overflow-hidden">
+      <img src="/assets/council-avatar.png" alt="The Council"
+           class="absolute inset-0 w-full h-full object-cover object-top opacity-90"
+           onerror="this.style.display='none'" />
+      <div class="relative z-10 w-full py-3 px-4 text-center" style="background:linear-gradient(transparent,rgba(0,0,0,0.85))">
+        <p class="text-[11px] font-bold tracking-[0.2em] text-amber-400 uppercase">Ultimate Universe</p>
+        <p class="text-[11px] font-bold tracking-[0.2em] text-amber-400 uppercase">Council</p>
+      </div>
+    </div>
+
+    <!-- Letter panel -->
+    <div class="flex flex-col flex-1 bg-[#0a0b14] p-6 sm:p-8 overflow-y-auto">
+      <!-- Verdict header -->
+      <div id="council-verdict-header" class="flex items-center gap-3 mb-5">
+        <div id="council-verdict-icon" class="w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0"></div>
+        <div>
+          <p id="council-verdict-label" class="text-base font-black uppercase tracking-widest"></p>
+          <p id="council-verdict-sub"   class="text-xs text-slate-400"></p>
+        </div>
+        <div id="council-seal" class="ml-auto text-3xl opacity-80 select-none"></div>
+      </div>
+
+      <!-- Divider -->
+      <div id="council-divider" class="h-px mb-5" style="background:linear-gradient(to right,transparent,rgba(255,255,255,0.15),transparent)"></div>
+
+      <!-- Letter body -->
+      <div id="council-letter-body"
+           class="flex-1 text-sm leading-relaxed text-slate-200 font-light whitespace-pre-wrap overflow-y-auto"
+           style="font-family:'Georgia',serif;min-height:80px;max-height:42vh"></div>
+
+      <!-- Spinner shown while AI writes -->
+      <div id="council-loading" class="hidden flex-col items-center justify-center gap-3 py-8 text-slate-400 text-sm">
+        <div class="w-7 h-7 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin"></div>
+        <span>The Council deliberates…</span>
+      </div>
+
+      <!-- Action button -->
+      <div class="mt-6">
+        <button id="council-dismiss"
+                class="w-full py-2.5 rounded-xl text-sm font-bold tracking-wide transition-all">
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- ── VENDOR SCRIPTS ────────────────────────────────────────── -->
 <script src="/vendor/pixi/pixi.min.js"></script>

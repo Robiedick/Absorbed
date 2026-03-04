@@ -6,6 +6,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const MODEL_PATH  = '/assets/planets/';
 const THUMB_SIZE  = 160;    // thumbnail canvas (px)
+const STAR_SIZE   = 512;    // star canvas (px) — kept high-res so it stays crisp when zoomed
 
 const FALLBACK_COLORS = {
   rocky: 0x8B7355, gas: 0xE8A87C, ocean: 0x1E6BA8,
@@ -16,7 +17,7 @@ const FALLBACK_COLORS = {
 const MODEL_POOLS = {
   rocky:    ['Fossil_Planet.glb','Mars_Red_planet.glb','Rust_Planet.glb','Rusted_Planet.glb','Dark_Metal_Planet.glb','Metallic_Planet.glb','Light_Metal_Planet.glb'],
   gas:      ['Dark_Blue_Purple_Green_Slime_Planet.glb','Greenish_Saturn_Ringed_Planet.glb'],
-  ocean:    ['Blue_Water_beaches_Planet.glb','Earth_Planet.glb','Tropical_EarthLike_Planet.glb','Water_Planet.glb'],
+  ocean:    ['Blue_Water_beaches_Planet.glb','Tropical_EarthLike_Planet.glb','Water_Planet.glb'],
   ice:      ['Greenish_Saturn_Ringed_Planet.glb','Light_Metal_Planet.glb','Metallic_Planet.glb'],
   volcanic: ['Red_Orange_Planet.glb','Weird_Vulcanic_Planet.glb','Mars_Red_planet.glb'],
   crystal:  ['Mystic_Planet.glb','Man_Made_Planet_1.glb','Man_Made_Planet_2.glb','Man_Made_Planet_3.glb'],
@@ -48,18 +49,23 @@ function normaliseGltf(root) {
 // ─────────────────────────────────────────────────────────────────────────────
 class Planet3DManager {
   constructor() {
-    this._renderer   = null;         // shared thumbnail renderer
-    this._loader     = new GLTFLoader();
+    this._renderer      = null;         // shared thumbnail renderer (160px)
+    this._starRenderer  = null;         // dedicated star renderer (STAR_SIZE)
+    this._loader        = new GLTFLoader();
     this._modelCache = new Map();    // filename → THREE.Group (with ._clips)
     this._loading    = new Map();    // filename → Promise
     this._planets    = new Map();    // planetId → entry
     this._available  = false;
+    this._starEntry  = null;         // { canvas, texture, scene, camera, mesh, selfAngle }
 
     // Viewer state
     this._vRen          = null;
     this._vCanvas       = null;   // the live <canvas> element inside wrap
     this._vWrap         = null;   // the wrapper div (for removing wheel listener)
     this._vWheelHandler = null;   // stored so it can be removed on close
+    this._vDragHandlers = null;   // mousedown/move/up for orbit drag
+    this._vDragYaw      = 0;      // accumulated horizontal drag offset
+    this._vDragPitch    = 0;      // accumulated vertical drag offset
     this._vScene        = null;
     this._vCamera       = null;
     this._vPivot        = null;
@@ -79,12 +85,24 @@ class Planet3DManager {
       this._renderer.setSize(THUMB_SIZE, THUMB_SIZE);
       this._renderer.setPixelRatio(1);  // keep 1:1 so drawImage copies the full frame
       this._renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+      // Separate high-res renderer just for the star so it stays crisp when zoomed
+      this._starRenderer = new THREE.WebGLRenderer({
+        alpha: true,
+        antialias: true,
+        preserveDrawingBuffer: true,
+      });
+      this._starRenderer.setSize(STAR_SIZE, STAR_SIZE);
+      this._starRenderer.setPixelRatio(1);
+      this._starRenderer.outputColorSpace = THREE.SRGBColorSpace;
+
       this._available = true;
       console.log('[Planet3D] Three.js WebGL thumbnail renderer ready');
     } catch (err) {
       console.warn('[Planet3D] WebGL unavailable — falling back to 2D sprites:', err.message);
     }
     this._loadModel(STAR_MODEL).catch(() => {});
+    this._loadModel('Planet_Explosion.glb').catch(() => {});
   }
 
   // ── Model cache ────────────────────────────────────────────────────────────
@@ -142,7 +160,7 @@ class Planet3DManager {
 
     const scene  = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
-    camera.position.z = 3.8;
+    camera.position.z = 5.5;   // far enough back that even large models never clip canvas edges
     addLights(scene);
 
     const pivot = new THREE.Group();
@@ -163,7 +181,9 @@ class Planet3DManager {
     (async () => {
       const orig = await this._loadModel(modelFile);
       const mesh = orig ? this._clone(orig) : this._sphere(planet.type);
-      mesh.scale.multiplyScalar(sizeScale);
+      // Fixed thumbnail scale — sizeScale is reflected by PIXI sprite size, not by 3D scale.
+      // Keep the model well inside the canvas so no edge-clipping "border" ever appears.
+      mesh.scale.setScalar(0.80);
       // Swap out temp sphere for the real model
       pivot.remove(tempMesh);
       pivot.add(mesh);
@@ -194,6 +214,17 @@ class Planet3DManager {
   // ── Main tick ──────────────────────────────────────────────────────────────
   tick(deltaTime) {
     if (!this._available) return;
+
+    // Rotate the 3D star thumbnail each frame — faster gives a lava-swirling feel
+    if (this._starEntry?.mesh) {
+      this._starEntry.selfAngle += 0.010 * deltaTime;
+      this._starEntry.mesh.rotation.y = this._starEntry.selfAngle;
+      // Gentle X wobble so the lava belts seem to shift
+      this._starEntry.mesh.rotation.x = Math.sin(this._starEntry.selfAngle * 0.3) * 0.18;
+      this._renderStar();
+      this._starEntry.texture.source.update();
+    }
+
     for (const [, e] of this._planets) {
       if (!e.ready) continue;
       e.selfAngle += e.selfRotSpeed * deltaTime;
@@ -214,6 +245,54 @@ class Planet3DManager {
 
   getTexture(planetId)   { return this._planets.get(planetId)?.texture || null; }
   isRegistered(planetId) { return this._planets.has(planetId); }
+  getStarTexture()       { return this._starEntry?.texture || null; }
+
+  // ── Star thumbnail (Sun.glb rendered to a live canvas) ─────────────────────
+  registerStar() {
+    if (!this._available || this._starEntry) return;
+
+    const canvas  = document.createElement('canvas');
+    canvas.width  = canvas.height = STAR_SIZE;
+    const source  = new PIXI.CanvasSource({ resource: canvas });
+    const texture = new PIXI.Texture({ source });
+
+    const scene  = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+    camera.position.z = 3.5;
+    // High-intensity lighting so the model looks self-luminous
+    scene.add(new THREE.AmbientLight(0xffffff, 2.8));
+    const key = new THREE.DirectionalLight(0xFFFFDD, 4.0);
+    key.position.set(4, 6, 4); scene.add(key);
+    const fill = new THREE.DirectionalLight(0xFF9900, 2.5);
+    fill.position.set(-4, -2, 2); scene.add(fill);
+    // Back-fill so dark side is still bright
+    const back = new THREE.DirectionalLight(0xFF6600, 1.5);
+    back.position.set(0, 0, -6); scene.add(back);
+
+    const entry = { canvas, texture, scene, camera, mesh: null, selfAngle: 0 };
+    this._starEntry = entry;
+
+    (async () => {
+      const orig = await this._loadModel(STAR_MODEL);
+      if (!this._starEntry) return;
+      const mesh = orig ? this._clone(orig) : new THREE.Mesh(
+        new THREE.SphereGeometry(1, 32, 24),
+        new THREE.MeshPhongMaterial({ color: 0xFFCC00, emissive: 0xFF8800, shininess: 60 })
+      );
+      scene.add(mesh);
+      entry.mesh = mesh;
+      this._renderStar();
+      entry.texture.source.update();
+    })();
+  }
+
+  _renderStar() {
+    if (!this._available || !this._starEntry || !this._starRenderer) return;
+    this._starRenderer.render(this._starEntry.scene, this._starEntry.camera);
+    const ctx = this._starEntry.canvas.getContext('2d');
+    ctx.clearRect(0, 0, STAR_SIZE, STAR_SIZE);
+    ctx.drawImage(this._starRenderer.domElement, 0, 0, STAR_SIZE, STAR_SIZE);
+  }
 
   unregisterPlanet(planetId) {
     const e = this._planets.get(planetId);
@@ -245,9 +324,12 @@ class Planet3DManager {
     this._vRen.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this._vRen.outputColorSpace = THREE.SRGBColorSpace;
 
+    const sizeScale = Number(planet.size_scale || 1.0);
+
     const scene  = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(38, W / H, 0.1, 200);
-    camera.position.set(0, 0.8, 5.8);
+    // Auto-fit camera distance so large sizeScale planets are never clipped
+    camera.position.set(0, 0.8, 2.5 + sizeScale * 3.3);
     camera.lookAt(0, 0, 0);
     this._vScene  = scene;
     this._vCamera = camera;
@@ -272,7 +354,6 @@ class Planet3DManager {
 
     const modelFile    = planet.model_file    || this._pickModel(planet.type, planet.id);
     const selfRotSpeed = Number(planet.self_rotation || 0.003);
-    const sizeScale    = Number(planet.size_scale    || 1.0);
     const moonData     = this._parseMoons(planet.moon_data);
 
     let selfAngle = 0;
@@ -297,7 +378,8 @@ class Planet3DManager {
       const dt = clock.getDelta();
       for (const m of this._vMixers) m.update(dt);
       selfAngle += selfRotSpeed * 0.7;
-      pivot.rotation.y = selfAngle;
+      pivot.rotation.y = selfAngle + this._vDragYaw;
+      pivot.rotation.x = this._vDragPitch;
       for (const m of vMoons) {
         m.angle += m.speed;
         m.mesh.position.set(Math.cos(m.angle) * m.radius, Math.sin(m.angle * 0.5 + m.tilt) * m.radius * 0.2, Math.sin(m.angle) * m.radius);
@@ -315,6 +397,29 @@ class Planet3DManager {
       this._vCamera.position.z = Math.max(2.0, Math.min(20.0, this._vCamera.position.z + e.deltaY * 0.012));
     };
     wrapEl.addEventListener('wheel', this._vWheelHandler, { passive: false });
+
+    // Mouse-drag orbit — left-click drag rotates the pivot
+    let _dragActive = false, _dragLastX = 0, _dragLastY = 0;
+    const onDragStart = (e) => {
+      if (e.button !== 0) return;
+      _dragActive = true;
+      _dragLastX = e.clientX; _dragLastY = e.clientY;
+      wrapEl.style.cursor = 'grabbing';
+    };
+    const onDragMove = (e) => {
+      if (!_dragActive) return;
+      const dx = e.clientX - _dragLastX;
+      const dy = e.clientY - _dragLastY;
+      _dragLastX = e.clientX; _dragLastY = e.clientY;
+      this._vDragYaw   += dx * 0.01;
+      this._vDragPitch  = Math.max(-1.2, Math.min(1.2, this._vDragPitch + dy * 0.008));
+    };
+    const onDragEnd = () => { _dragActive = false; wrapEl.style.cursor = 'grab'; };
+    wrapEl.style.cursor = 'grab';
+    wrapEl.addEventListener('mousedown', onDragStart);
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup',   onDragEnd);
+    this._vDragHandlers = { start: onDragStart, move: onDragMove, end: onDragEnd };
   }
 
   closeViewer() {
@@ -324,10 +429,146 @@ class Planet3DManager {
       this._vWrap.removeEventListener('wheel', this._vWheelHandler);
       this._vWheelHandler = null;
     }
+    if (this._vDragHandlers) {
+      this._vWrap?.removeEventListener('mousedown', this._vDragHandlers.start);
+      window.removeEventListener('mousemove', this._vDragHandlers.move);
+      window.removeEventListener('mouseup',   this._vDragHandlers.end);
+      this._vDragHandlers = null;
+    }
+    this._vDragYaw = 0; this._vDragPitch = 0;
     if (this._vRen)     { this._vRen.dispose(); this._vRen = null; }
     if (this._vCanvas)  { this._vCanvas.remove(); this._vCanvas = null; }
     this._vWrap = null;
     this._vScene = null; this._vCamera = null; this._vPivot = null; this._vMixers = [];
+  }
+
+  // ── Explosion overlay on the main solar system screen ────────────────────
+  spawnExplosionAt(screenX, screenY) {
+    const SIZE = 420;
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = SIZE;
+    canvas.style.cssText = [
+      'position:fixed',
+      `left:${Math.round(screenX - SIZE / 2)}px`,
+      `top:${Math.round(screenY  - SIZE / 2)}px`,
+      `width:${SIZE}px`,
+      `height:${SIZE}px`,
+      'pointer-events:none',
+      'z-index:9000',
+    ].join(';');
+    document.body.appendChild(canvas);
+
+    const ren = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    ren.setSize(SIZE, SIZE, false);
+    ren.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    ren.outputColorSpace = THREE.SRGBColorSpace;
+
+    const scene  = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+    camera.position.z = 5.0;
+    scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+    const pLight = new THREE.PointLight(0xFF6600, 8, 30);
+    pLight.position.set(0, 0, 3); scene.add(pLight);
+
+    // ── Procedural particles — always visible, no GLB required ─────────────
+    const FIRE_COLS = [0xFF2200, 0xFF6600, 0xFFAA00, 0xFFEE44, 0xFF4400, 0xFFFFAA];
+    const particles = [];
+    for (let i = 0; i < 32; i++) {
+      const r    = 0.06 + Math.random() * 0.22;
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(r, 8, 8),
+        new THREE.MeshBasicMaterial({
+          color: FIRE_COLS[Math.floor(Math.random() * FIRE_COLS.length)],
+          transparent: true, opacity: 1.0,
+        }),
+      );
+      const phi   = Math.random() * Math.PI * 2;
+      const theta = Math.random() * Math.PI;
+      const speed = 1.2 + Math.random() * 2.8;
+      const dir   = new THREE.Vector3(
+        Math.sin(theta) * Math.cos(phi),
+        Math.sin(theta) * Math.sin(phi),
+        Math.cos(theta),
+      ).multiplyScalar(speed);
+      mesh.position.set(0, 0, 0);
+      scene.add(mesh);
+      particles.push({ mesh, dir, life: 1.0, decay: 0.5 + Math.random() * 0.8 });
+    }
+
+    // expanding shockwave ring
+    const ringGeo = new THREE.RingGeometry(0.05, 0.25, 48);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xFFAA00, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    scene.add(ring);
+    let ringScale = 0.1;
+
+    // ── GLB animation (plays on top if clips exist) ─────────────────────────
+    const mixers = [];
+    const clock  = new THREE.Clock();
+    const DURATION = 4200;
+    let   start    = 0;
+    let   frameId  = null;
+
+    const loop = () => {
+      const dt       = clock.getDelta();
+      const progress = start ? Math.min((performance.now() - start) / DURATION, 1) : 0;
+
+      // Update GLB mixers
+      for (const m of mixers) m.update(dt);
+
+      // Update procedural particles
+      for (const p of particles) {
+        p.life = Math.max(0, p.life - dt * p.decay);
+        p.mesh.position.addScaledVector(p.dir, dt);
+        p.dir.multiplyScalar(1 + dt * 1.2); // accelerate outward
+        p.mesh.material.opacity = Math.pow(p.life, 1.5);
+      }
+
+      // Expand shockwave ring
+      ringScale += dt * 3.5;
+      ring.scale.set(ringScale, ringScale, 1);
+      ringMat.opacity = Math.max(0, 0.9 - ringScale * 0.12);
+
+      ren.render(scene, camera);
+
+      if (progress < 1) {
+        frameId = requestAnimationFrame(loop);
+      } else {
+        cancelAnimationFrame(frameId);
+        ren.dispose();
+        canvas.remove();
+      }
+    };
+
+    // Start procedural particles immediately, GLB on top when ready
+    clock.start();
+    start   = performance.now();
+    frameId = requestAnimationFrame(loop);
+
+    (async () => {
+      const orig = await this._loadModel('Planet_Explosion.glb');
+      if (!orig) return;
+      const clips = orig.userData._clips || [];
+      if (clips.length === 0) {
+        console.warn('[Planet3D] Planet_Explosion.glb loaded but has 0 animation clips — using procedural only.');
+        return;
+      }
+      const expMesh = this._clone(orig);
+      expMesh.scale.setScalar(2.4);
+      scene.add(expMesh);
+      // Use expMesh as mixer root — clips must resolve against its hierarchy
+      const mixer = new THREE.AnimationMixer(expMesh);
+      for (const clip of clips) {
+        const action = mixer.clipAction(clip);
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+        action.play();
+      }
+      mixers.push(mixer);
+      console.log(`[Planet3D] Playing ${clips.length} GLB animation clip(s) from Planet_Explosion.glb`);
+    })();
   }
 
   // ── Explode the planet in the viewer, then call onComplete ─────────────────

@@ -52,6 +52,13 @@ const PROD = {
   const token    = localStorage.getItem('absorbed_token');
   const username = localStorage.getItem('absorbed_user');
   isAdmin = localStorage.getItem('absorbed_is_admin') === '1';
+  // Always re-derive isAdmin from the JWT payload so stale localStorage can't hide the panel
+  if (token) {
+    try {
+      const pl = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      if (pl.is_admin) { isAdmin = true; localStorage.setItem('absorbed_is_admin', '1'); }
+    } catch {}
+  }
   if (token && username) {
     api.setToken(token);
     currentUser = username;
@@ -146,15 +153,15 @@ function wireGameUI() {
     if (_viewerPlanet) destroyPlanet(_viewerPlanet);
   });
 
+  // Rename buttons
+  document.getElementById('btn-rename-system').addEventListener('click', () => handleRenameSystem());
+  document.getElementById('btn-rename-panel-planet').addEventListener('click', () => handleRenamePlanet(selectedPlanet));
+  document.getElementById('btn-rename-viewer-planet').addEventListener('click', () => handleRenamePlanet(_viewerPlanet));
+
   document.getElementById('btn-upgrade-planet').addEventListener('click', async () => {
     if (!selectedPlanet) return;
     audio.click();
-    try {
-      const res = await api.upgradePlanet(selectedPlanet.id);
-      toast(`🔺 ${res.message}`, 'violet');
-      audio.upgrade();
-      await loadAndRender();
-    } catch (err) { toast(err.message, 'red'); audio.error(); }
+    openCouncilModal(selectedPlanet);
   });
 
   // Galaxy
@@ -311,7 +318,169 @@ function closePlanetPanel() {
     panel.classList.add('hidden'); panel.style.opacity = 1; panel.style.transform = '';
   }});
 }
+// ── Ultimate Universe Council modal ─────────────────────────────────────────────────
+function openCouncilModal(planet) {
+  const modal      = document.getElementById('council-modal');
+  const body       = document.getElementById('council-letter-body');
+  const loading    = document.getElementById('council-loading');
+  const header     = document.getElementById('council-verdict-header');
+  const dismiss    = document.getElementById('council-dismiss');
 
+  // Show modal immediately with loading state
+  body.textContent = '';
+  body.classList.add('hidden');
+  loading.classList.remove('hidden');
+  loading.classList.add('flex');
+  header.classList.add('hidden');
+  document.getElementById('council-divider').classList.add('hidden');
+  dismiss.textContent = 'Please wait…';
+  dismiss.disabled    = true;
+  dismiss.className   = 'w-full py-2.5 rounded-xl text-sm font-bold tracking-wide transition-all bg-slate-800 text-slate-500 cursor-not-allowed';
+
+  modal.classList.remove('hidden');
+  gsap.from('#council-modal > div', { opacity: 0, scale: 0.92, duration: 0.35, ease: 'back.out(1.4)' });
+
+  // Call API while modal is visible
+  api.upgradePlanet(planet.id).then(res => {
+    _fillCouncilModal(res, planet);
+  }).catch(err => {
+    // Hard error (not enough resources, already queued, etc.)
+    loading.classList.add('hidden');
+    loading.classList.remove('flex');
+    body.classList.remove('hidden');
+    body.textContent = err.message || 'An error occurred.';
+    header.classList.remove('hidden');
+    document.getElementById('council-verdict-icon').textContent  = '\u26A0\uFE0F';
+    document.getElementById('council-verdict-label').textContent = 'Request Failed';
+    document.getElementById('council-verdict-label').className   = 'text-base font-black uppercase tracking-widest text-red-400';
+    document.getElementById('council-verdict-sub').textContent   = '';
+    document.getElementById('council-seal').textContent          = '\u274C';
+    document.getElementById('council-divider').classList.remove('hidden');
+    dismiss.textContent = 'Dismiss';
+    dismiss.disabled    = false;
+    dismiss.className   = 'w-full py-2.5 rounded-xl text-sm font-bold tracking-wide transition-all bg-slate-800 hover:bg-slate-700 text-slate-300';
+    audio.error?.();
+  });
+}
+
+function _fillCouncilModal(res, planet) {
+  const body     = document.getElementById('council-letter-body');
+  const loading  = document.getElementById('council-loading');
+  const header   = document.getElementById('council-verdict-header');
+  const divider  = document.getElementById('council-divider');
+  const dismiss  = document.getElementById('council-dismiss');
+  const approved = res.verdict === 'approved';
+
+  loading.classList.add('hidden');
+  loading.classList.remove('flex');
+  body.classList.remove('hidden');
+  header.classList.remove('hidden');
+  divider.classList.remove('hidden');
+
+  // Style verdict header
+  document.getElementById('council-verdict-icon').textContent  = approved ? '\u2705' : '\u274C';
+  document.getElementById('council-verdict-icon').className   = `w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0 ${approved ? 'bg-green-900/50' : 'bg-red-900/50'}`;
+  document.getElementById('council-verdict-label').textContent = approved ? 'UPGRADE APPROVED' : 'UPGRADE DENIED';
+  document.getElementById('council-verdict-label').className   = `text-base font-black uppercase tracking-widest ${approved ? 'text-green-400' : 'text-red-400'}`;
+  document.getElementById('council-verdict-sub').textContent   = approved
+    ? `${planet.name} may ascend to Level ${planet.level + 1}`
+    : `${planet.name} shall remain at Level ${planet.level}`;
+  document.getElementById('council-seal').textContent          = approved ? '\u2728' : '\uD83D\uDCDC';
+
+  // Letter body with typewriter effect
+  body.textContent = '';
+  const text = res.letter || '';
+  let i = 0;
+  const type = () => {
+    if (i < text.length) { body.textContent += text[i++]; requestAnimationFrame(type); }
+  };
+  requestAnimationFrame(type);
+
+  // Dismiss button
+  dismiss.disabled  = false;
+  dismiss.textContent = approved ? '\uD83D\uDE80  Proceed with Upgrade' : '\uD83D\uDDE1\uFE0F  Challenge the Council Next Time';
+  dismiss.className = approved
+    ? 'w-full py-2.5 rounded-xl text-sm font-bold tracking-wide transition-all bg-green-700 hover:bg-green-600 text-white'
+    : 'w-full py-2.5 rounded-xl text-sm font-bold tracking-wide transition-all bg-red-900/60 hover:bg-red-800/70 text-red-300';
+
+  // Wire dismiss
+  const newBtn = dismiss.cloneNode(true);
+  newBtn.textContent = dismiss.textContent;
+  newBtn.className   = dismiss.className;
+  newBtn.disabled    = false;
+  dismiss.replaceWith(newBtn);
+  newBtn.addEventListener('click', async () => {
+    document.getElementById('council-modal').classList.add('hidden');
+    if (approved) {
+      toast(`\uD83D\uDD3A ${res.message}`, 'violet');
+      audio.upgrade?.();
+      await loadAndRender();
+    } else {
+      toast('\uD83D\uDCDC The Council has spoken. Upgrade denied.', 'red');
+    }
+  });
+
+  if (approved) audio.build?.();
+  else          audio.error?.();
+}
+
+// ── Rename helpers ────────────────────────────────────────────────────────────────────
+function _inlineRename(labelEl, buttonEl, currentValue, onSave) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentValue;
+  input.className = 'bg-transparent border-b border-indigo-400 text-white text-xs outline-none min-w-0 w-full max-w-[120px]';
+  labelEl.replaceWith(input);
+  buttonEl.classList.add('hidden');
+  input.focus(); input.select();
+  const finish = async () => {
+    const val = input.value.trim();
+    input.replaceWith(labelEl);
+    buttonEl.classList.remove('hidden');
+    if (val && val !== currentValue) await onSave(val);
+  };
+  input.addEventListener('blur', finish);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = currentValue; input.blur(); } });
+}
+
+async function handleRenameSystem() {
+  const labelEl  = document.getElementById('sys-name-label');
+  const buttonEl = document.getElementById('btn-rename-system');
+  const current  = labelEl.textContent.trim();
+  _inlineRename(labelEl, buttonEl, current, async (newName) => {
+    try {
+      const res = await api.renameSystem(newName);
+      document.getElementById('sys-name-label').textContent = res.name;
+      if (gameState?.solar_system) gameState.solar_system.name = res.name;
+      toast(`System renamed to “${res.name}”`, 'indigo');
+    } catch (err) { toast(err.message, 'red'); }
+  });
+}
+
+async function handleRenamePlanet(planet) {
+  if (!planet) return;
+  // Use whichever context is currently visible — viewer takes priority
+  const viewerOpen = !document.getElementById('planet-viewer').classList.contains('hidden');
+  const [labelId, btnId] = viewerOpen
+    ? ['pv-name',      'btn-rename-viewer-planet']
+    : ['planet-name',  'btn-rename-panel-planet'];
+  const labelEl  = document.getElementById(labelId);
+  const buttonEl = document.getElementById(btnId);
+  if (!labelEl) return;
+  const current = planet.name || '';
+  _inlineRename(labelEl, buttonEl, current, async (newName) => {
+    try {
+      const res = await api.renamePlanet(planet.id, newName);
+      planet.name = res.name;
+      const pvName = document.getElementById('pv-name');
+      const pName  = document.getElementById('planet-name');
+      if (pvName) pvName.textContent = res.name;
+      if (pName)  pName.textContent  = res.name;
+      toast(`Renamed to “${res.name}”`, 'indigo');
+      await loadAndRender();
+    } catch (err) { toast(err.message, 'red'); }
+  });
+}
 // ── Planet Viewer (full-screen 3D inspector) ────────────────────────────────
 let _viewerPlanet = null;
 
@@ -344,17 +513,39 @@ function openPlanetViewer(planet) {
   document.getElementById('pv-size').textContent      = planet.size_scale      ? `${Number(planet.size_scale).toFixed(2)}x`    : '—';
   document.getElementById('pv-moons').textContent     = planet.moon_count != null ? String(planet.moon_count) : '0';
 
-  // Moon list
+  // Moon list — each moon is clickable to expand its specs
   const moonList = document.getElementById('pv-moon-list');
   const moons    = planet.moon_data ? (typeof planet.moon_data === 'string' ? JSON.parse(planet.moon_data) : planet.moon_data) : [];
   if (moons.length > 0) {
     moonList.classList.remove('hidden');
     moonList.innerHTML = '<h3 class="text-slate-400 font-semibold uppercase tracking-wider text-[10px] mb-1">Moons</h3>';
     moons.forEach((m, i) => {
-      const li = document.createElement('div');
-      li.className = 'flex justify-between text-slate-300';
-      li.innerHTML = `<span>🌑 Moon ${i + 1}</span><span class="text-slate-500">${m.model_file?.replace('.glb','').replace(/_/g,' ') || ''}</span>`;
-      moonList.appendChild(li);
+      const modelName = m.model_file?.replace('.glb','').replace(/_/g,' ') || 'Unknown';
+      const item = document.createElement('div');
+      item.className = 'rounded hover:bg-white/5 cursor-pointer transition-colors';
+
+      const header = document.createElement('div');
+      header.className = 'flex items-center justify-between py-0.5 text-slate-300';
+      header.innerHTML = `<span class="flex items-center gap-1.5"><span class="text-sm">\u{1F311}</span><span class="font-medium">Moon ${i + 1}</span></span><i class="fa-solid fa-chevron-right text-slate-500 text-[10px] transition-transform"></i>`;
+
+      const detail = document.createElement('div');
+      detail.className = 'text-[11px] text-slate-400 pl-5 pb-1.5 flex-col gap-0.5 hidden';
+      detail.innerHTML = [
+        `<div class="flex justify-between"><span>Model</span><span class="text-slate-300 truncate max-w-[110px]" title="${modelName}">${modelName}</span></div>`,
+        `<div class="flex justify-between"><span>Orbit Speed</span><span class="text-slate-300">${m.orbital_speed != null ? m.orbital_speed.toFixed(3) : '\u2014'}</span></div>`,
+        `<div class="flex justify-between"><span>Orbit Radius</span><span class="text-slate-300">${m.orbital_radius != null ? m.orbital_radius.toFixed(2) : '\u2014'}</span></div>`,
+        `<div class="flex justify-between"><span>Size Scale</span><span class="text-slate-300">${m.size_scale != null ? m.size_scale.toFixed(2) : '\u2014'}</span></div>`,
+      ].join('');
+
+      header.addEventListener('click', () => {
+        const collapsed = detail.classList.toggle('hidden');
+        detail.classList.toggle('flex', !collapsed);
+        header.querySelector('i').style.transform = collapsed ? '' : 'rotate(90deg)';
+      });
+
+      item.appendChild(header);
+      item.appendChild(detail);
+      moonList.appendChild(item);
     });
   } else {
     moonList.classList.add('hidden');
