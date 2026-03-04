@@ -56,14 +56,16 @@ class Planet3DManager {
     this._available  = false;
 
     // Viewer state
-    this._vRen     = null;
-    this._vCanvas  = null;   // the live <canvas> element inside wrap
-    this._vScene   = null;
-    this._vCamera  = null;
-    this._vPivot   = null;
-    this._vMixers  = [];
-    this._vActive  = false;
-    this._vFrameId = null;
+    this._vRen          = null;
+    this._vCanvas       = null;   // the live <canvas> element inside wrap
+    this._vWrap         = null;   // the wrapper div (for removing wheel listener)
+    this._vWheelHandler = null;   // stored so it can be removed on close
+    this._vScene        = null;
+    this._vCamera       = null;
+    this._vPivot        = null;
+    this._vMixers       = [];
+    this._vActive       = false;
+    this._vFrameId      = null;
   }
 
   async init() {
@@ -224,6 +226,8 @@ class Planet3DManager {
   openViewer(planet, wrapEl) {
     this.closeViewer();
 
+    this._vWrap = wrapEl;
+
     // Create a brand-new canvas so Three.js gets a fresh WebGL context every time
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'display:block;position:absolute;top:0;left:0;width:100%;height:100%';
@@ -303,13 +307,26 @@ class Planet3DManager {
       this._vFrameId = requestAnimationFrame(loop);
     };
     this._vFrameId = requestAnimationFrame(loop);
+
+    // Scroll-to-zoom: wheel moves the camera closer/further
+    this._vWheelHandler = (e) => {
+      e.preventDefault();
+      if (!this._vCamera) return;
+      this._vCamera.position.z = Math.max(2.0, Math.min(20.0, this._vCamera.position.z + e.deltaY * 0.012));
+    };
+    wrapEl.addEventListener('wheel', this._vWheelHandler, { passive: false });
   }
 
   closeViewer() {
     this._vActive = false;
     if (this._vFrameId) { cancelAnimationFrame(this._vFrameId); this._vFrameId = null; }
+    if (this._vWheelHandler && this._vWrap) {
+      this._vWrap.removeEventListener('wheel', this._vWheelHandler);
+      this._vWheelHandler = null;
+    }
     if (this._vRen)     { this._vRen.dispose(); this._vRen = null; }
     if (this._vCanvas)  { this._vCanvas.remove(); this._vCanvas = null; }
+    this._vWrap = null;
     this._vScene = null; this._vCamera = null; this._vPivot = null; this._vMixers = [];
   }
 

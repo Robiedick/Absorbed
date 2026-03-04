@@ -17,6 +17,8 @@ export class SolarSystemRenderer {
     this._noiseT      = 0;
     this._layers      = {};
     this._saveCounter = 0;
+    this._world       = null;   // zoomable container (orbits + planets + star + fx)
+    this._worldScale  = 1.0;
   }
 
   async init() {
@@ -52,20 +54,34 @@ export class SolarSystemRenderer {
     this._layers.star    = new PIXI.Container();
     this._layers.fx      = new PIXI.Container();
 
-    this.app.stage.addChild(
-      this._layers.stars,
+    // _world wraps everything except the static starfield so it can be
+    // scaled as a unit for scroll-to-zoom. Pivot is locked to the system
+    // centre, so zooming always targets the star.
+    this._world = new PIXI.Container();
+    this._world.addChild(
       this._layers.orbits,
       this._layers.planets,
       this._layers.star,
       this._layers.fx,
     );
+    this.app.stage.addChild(this._layers.stars, this._world);
 
     this._buildStarfield();
+    this._updateWorldPivot();
+
+    // Scroll-to-zoom on the dashboard
+    this.app.canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.12 : 0.89;
+      this._worldScale = Math.max(0.3, Math.min(4.0, this._worldScale * factor));
+      this._world.scale.set(this._worldScale);
+    }, { passive: false });
 
     this.app.ticker.add(this._tick.bind(this));
     window.addEventListener('resize', () => {
       this.app.renderer.resize(window.innerWidth, window.innerHeight);
       this._buildStarfield();
+      this._updateWorldPivot();
       this._repositionAll();
     });
   }
@@ -80,6 +96,13 @@ export class SolarSystemRenderer {
   get cy() { return this._topHUD   + this._visH / 2; }
   // Max orbit radius — fill ~88% of the smaller visible dimension
   get _maxOrbitR() { return Math.min(this._visW, this._visH) * 0.44; }
+
+  // Keep the _world pivot locked to the visible system centre so wheel-zoom
+  // always scales around the star rather than the screen origin.
+  _updateWorldPivot() {
+    this._world.pivot.set(this.cx, this.cy);
+    this._world.position.set(this.cx, this.cy);
+  }
 
   // ── Orbit angle persistence ─────────────────────────────────────────────────
   _loadOrbitAngles() {
@@ -387,6 +410,67 @@ export class SolarSystemRenderer {
     flash.rect(0, 0, this.app.screen.width, this.app.screen.height).fill({ color: 0xff0000, alpha: 0.18 });
     this._layers.fx.addChild(flash);
     gsap.to(flash, { alpha: 0, duration: 0.8, onComplete: () => this._layers.fx.removeChild(flash) });
+  }
+
+  // Explosion at a specific planet's current screen position, then calls onDone.
+  spawnPlanetExplosion(planetId, onDone) {
+    const ctr = this.planetGfx.get(planetId);
+    // _layers.fx lives inside _world, so use world-local coords (= ctr.x / ctr.y)
+    const x   = ctr ? ctr.x : this.cx;
+    const y   = ctr ? ctr.y : this.cy;
+
+    // Fade + scale-up the planet sprite so it looks like it's blowing apart
+    if (ctr) {
+      gsap.to(ctr.scale, { x: 2.0, y: 2.0, duration: 0.25, ease: 'power2.out' });
+      gsap.to(ctr,       { alpha: 0,        duration: 0.35, ease: 'power2.in'  });
+    }
+
+    // Central flash
+    const flash = new PIXI.Graphics();
+    flash.circle(x, y, 70).fill({ color: 0xFF8800, alpha: 0.7 });
+    this._layers.fx.addChild(flash);
+    gsap.to(flash, { alpha: 0, duration: 0.6, onComplete: () => this._layers.fx.removeChild(flash) });
+
+    // Particle burst
+    const COLORS = [0xFF2200, 0xFF6600, 0xFFAA00, 0xFFEE44, 0xFF4400];
+    for (let i = 0; i < 48; i++) {
+      const p   = new PIXI.Graphics();
+      const r   = 2.5 + Math.random() * 7;
+      p.circle(0, 0, r).fill({ color: COLORS[Math.floor(Math.random() * COLORS.length)], alpha: 1 });
+      p.x = x; p.y = y;
+      this._layers.fx.addChild(p);
+      const ang  = Math.random() * Math.PI * 2;
+      const dist = 50 + Math.random() * 180;
+      gsap.to(p, {
+        x: x + Math.cos(ang) * dist,
+        y: y + Math.sin(ang) * dist,
+        alpha: 0,
+        duration: 0.6 + Math.random() * 0.7,
+        ease:     'power2.out',
+        onComplete: () => this._layers.fx.removeChild(p),
+      });
+    }
+
+    // Smoke / debris trail (darker, slower)
+    for (let i = 0; i < 16; i++) {
+      const p   = new PIXI.Graphics();
+      p.circle(0, 0, 4 + Math.random() * 6).fill({ color: 0x443311, alpha: 0.7 });
+      p.x = x; p.y = y;
+      this._layers.fx.addChild(p);
+      const ang  = Math.random() * Math.PI * 2;
+      const dist = 20 + Math.random() * 80;
+      gsap.to(p, {
+        x: x + Math.cos(ang) * dist,
+        y: y + Math.sin(ang) * dist,
+        alpha: 0,
+        duration: 1.0 + Math.random() * 0.8,
+        delay:    0.1 + Math.random() * 0.2,
+        ease:     'power1.out',
+        onComplete: () => this._layers.fx.removeChild(p),
+      });
+    }
+
+    setTimeout(() => onDone?.(), 900);
   }
 
   // Explosion particle burst at screen centre

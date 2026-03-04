@@ -377,18 +377,21 @@ async function destroyPlanet(planet) {
   btn.disabled = true;
   status.classList.remove('hidden');
   audio.error?.();
-  planet3d.explodeInViewer(planet, async () => {
+
+  // Close the inspect panel immediately so the player sees their solar system
+  const savedPlanet = { ...planet };
+  closePlanetPanel();
+  closePlanetViewer();
+
+  // Trigger the visual explosion on the main 2D screen
+  renderer.spawnPlanetExplosion(savedPlanet.id, async () => {
     try {
-      await api.deletePlanet(planet.id);
-      planet3d.unregisterPlanet(planet.id);
-      closePlanetPanel();
-      closePlanetViewer();
-      toast(`💥 ${planet.name} has been destroyed.`, 'red');
+      await api.deletePlanet(savedPlanet.id);
+      planet3d.unregisterPlanet(savedPlanet.id);
+      toast(`💥 ${savedPlanet.name} has been destroyed.`, 'red');
       await loadAndRender();
     } catch (err) {
       toast(err.message || 'Destroy failed.', 'red');
-      btn.disabled = false;
-      status.classList.add('hidden');
     }
   });
 }
