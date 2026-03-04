@@ -161,8 +161,25 @@ router.post('/upgrade-planet', auth, async (req, res) => {
     return res.status(400).json({ error: 'Not enough resources.', need: cfg.cost });
   }
 
-  // ── Ultimate Universe Council verdict (50 / 50) ───────────────────────────
-  const verdict = Math.random() < 0.5 ? 'approved' : 'denied';
+  // ── Council lockout: planet may be banned from upgrading for a period ────
+  const now = Math.floor(Date.now() / 1000);
+  if (planet.council_denied_until && planet.council_denied_until > now) {
+    const secsLeft = planet.council_denied_until - now;
+    const hrs  = Math.floor(secsLeft / 3600);
+    const mins = Math.floor((secsLeft % 3600) / 60);
+    return res.status(403).json({
+      error: 'council_lockout',
+      denied_until: planet.council_denied_until,
+      message: `The Council will not hear this petition for another ${hrs}h ${mins}m.`,
+    });
+  }
+
+  // ── Ultimate Universe Council verdict (50/50 + streak-breaker) ───────────
+  // After 3 consecutive denials the next verdict is guaranteed approved, so
+  // players can never be soft-locked by pure bad luck.
+  const DENY_LOCKOUT_SECS = 6 * 60 * 60; // 6 real-time hours
+  const streak  = planet.council_deny_streak || 0;
+  const verdict = (streak >= 3 || Math.random() < 0.5) ? 'approved' : 'denied';
 
   // Gather solar system context for the AI letter
   const allPlanets = db.prepare('SELECT name, type, level FROM planets WHERE solar_system_id = ?').all(sys.id);
@@ -178,11 +195,15 @@ router.post('/upgrade-planet', auth, async (req, res) => {
   }
 
   if (verdict === 'denied') {
-    glog(req, 'UPGRADE_PLANET_DENIED', `Council denied upgrade of ${planet.name} (lv${planet.level}→${planet.level + 1})`, LEVELS.ACTION, { planet_id: planet.id });
-    return res.json({ verdict: 'denied', letter });
+    const deniedUntil = now + DENY_LOCKOUT_SECS;
+    db.prepare(`UPDATE planets SET council_denied_until = ?, council_deny_streak = ? WHERE id = ?`)
+      .run(deniedUntil, streak + 1, planet.id);
+    glog(req, 'UPGRADE_PLANET_DENIED', `Council denied upgrade of ${planet.name} (streak ${streak + 1}, locked until ${deniedUntil})`, LEVELS.ACTION, { planet_id: planet.id });
+    return res.json({ verdict: 'denied', letter, denied_until: deniedUntil });
   }
 
   // ── Approved: deduct resources and queue ─────────────────────────────────
+  db.prepare(`UPDATE planets SET council_denied_until = 0, council_deny_streak = 0 WHERE id = ?`).run(planet.id);
   db.prepare(`
     UPDATE solar_systems SET matter = matter - ?, energy = energy - ?, credits = credits - ?
     WHERE id = ?

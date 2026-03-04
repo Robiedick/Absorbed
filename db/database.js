@@ -30,9 +30,9 @@ CREATE TABLE IF NOT EXISTS solar_systems (
   name         TEXT    NOT NULL,
   star_type    TEXT    DEFAULT 'yellow_dwarf',
   star_level   INTEGER DEFAULT 1,
-  energy       REAL    DEFAULT 150,
-  matter       REAL    DEFAULT 150,
-  credits      REAL    DEFAULT 75,
+  energy       REAL    DEFAULT 100,
+  matter       REAL    DEFAULT 100,
+  credits      REAL    DEFAULT 50,
   last_tick    INTEGER DEFAULT (unixepoch()),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
@@ -95,6 +95,8 @@ try { db.exec(`ALTER TABLE planets ADD COLUMN orbital_speed   REAL DEFAULT 1.0`)
 try { db.exec(`ALTER TABLE planets ADD COLUMN size_scale      REAL DEFAULT 1.0`); } catch {}
 try { db.exec(`ALTER TABLE planets ADD COLUMN moon_count      INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`ALTER TABLE planets ADD COLUMN moon_data       TEXT DEFAULT '[]'`); } catch {}
+try { db.exec(`ALTER TABLE planets ADD COLUMN council_denied_until INTEGER DEFAULT 0`); } catch {}
+try { db.exec(`ALTER TABLE planets ADD COLUMN council_deny_streak  INTEGER DEFAULT 0`); } catch {}
 
 // ── Admin seeding: promote 'robiedick' ────────────────────────────────────────
 db.prepare(`UPDATE users SET is_admin = 1 WHERE username = 'robiedick'`).run();
@@ -112,19 +114,43 @@ const PLANET_PRODUCTION = {
 // Star base energy per level per minute
 const STAR_ENERGY_PER_LEVEL = 3;
 
-// Build costs & times (seconds)
+// ── Build costs & times ───────────────────────────────────────────────────────
+// Economy target:
+//   • 1st planet is free (injected on registration)
+//   • Full 8-planet system should take ~1 week with normal income
+//   • Upgrading L1→5 is "doable" (a day or two per planet)
+//   • L6+ is considerably slower (days per upgrade)
 const BUILD_CONFIG = {
   new_planet: {
-    cost: { matter: 40, energy: 30, credits: 10 },
-    time: 20,   // seconds (short for demo)
+    cost: { matter: 1200, energy: 900, credits: 300 },
+    time: 7200,   // 2 hours
   },
-  upgrade_planet: (level) => ({
-    cost: { matter: level * 60, energy: level * 45, credits: level * 15 },
-    time: level * 30,
-  }),
+
+  // level = current planet level (upgrading FROM this level)
+  // L1→5: quadratic scaling  (×1, ×4, ×9, ×16, ×25)
+  // L6+:  cubic cliff  (×75, ×225, ×675 …)
+  upgrade_planet: (level) => {
+    const scale = level <= 5
+      ? level * level
+      : 25 * Math.pow(3, level - 5);
+    return {
+      cost: {
+        matter:  Math.round(280 * scale),
+        energy:  Math.round(200 * scale),
+        credits: Math.round(70  * scale),
+      },
+      time: Math.round(scale * 1200),  // L1: 20 min, L2: 80 min, L3: 3 h, L4: 5.3 h, L5: 8.3 h, L6: 25 h, L7: 75 h
+    };
+  },
+
+  // Star upgrades scale quadratically — meaningful but not a daily routine
   upgrade_star: (level) => ({
-    cost: { matter: level * 80, energy: level * 50, credits: level * 30 },
-    time: level * 60,
+    cost: {
+      matter:  level * level * 1200,
+      energy:  level * level * 800,
+      credits: level * level * 300,
+    },
+    time: level * level * 3600,  // L1→2: 1 h, L2→3: 4 h, L3→4: 9 h …
   }),
 };
 

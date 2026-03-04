@@ -28,8 +28,9 @@ async function chat(systemPrompt, userPrompt) {
         { role: 'system', content: systemPrompt },
         { role: 'user',   content: userPrompt   },
       ],
-      temperature: 0.9,   // high variance → reasons never repeat
+      temperature: 0.7,
       max_tokens:  420,
+      stream:      false,
     }),
   });
 
@@ -53,12 +54,7 @@ async function chat(systemPrompt, userPrompt) {
  * @returns {Promise<string>} — the letter text
  */
 async function councilLetter(verdict, planet, sys, planets) {
-  const systemPrompt = `You are the scribe of the Ultimate Universe Council, an ancient and powerful 
-interstellar governing body. You write formal decrees in a dramatic, pompous, slightly archaic tone — 
-somewhere between a space emperor and a medieval magistrate. Keep letters under 180 words. 
-Never start with "Dear" — use a formal proclamation opening like "By decree of the Council..." 
-or "Let it be known...". Always give exactly three numbered reasons specific to the state of 
-the player's solar system. Each letter must feel unique — vary vocabulary, reasons, and style.`;
+  const systemPrompt = `You are the scribe of the Ultimate Universe Council, an ancient and powerful interstellar governing body. Write formal decrees in a dramatic, pompous, slightly archaic tone — somewhere between a space emperor and a medieval magistrate. Keep letters under 180 words. Never start with "Dear". Use a formal proclamation opening like "By decree of the Council..." or "Let it be known...". Give exactly three numbered reasons specific to the state of the player's solar system. Write in plain, correct English sentences only. Do not scramble, shuffle, or distort any words.`;
 
   const systemContext = `
 Solar System: "${sys.name}"

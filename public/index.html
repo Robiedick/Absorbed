@@ -2,7 +2,11 @@
 <html lang="en" class="h-full">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#020409" />
   <title>Absorbed — Solar Dominion</title>
   <link rel="stylesheet" href="/css/styles.css" />
   <link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css" />
@@ -75,17 +79,22 @@
     <div class="flex items-center gap-3 ml-auto">
       <span class="text-xs text-slate-400"><i class="fa-solid fa-circle text-green-400 text-xs"></i>
         <span id="online-count">1</span> online</span>
-      <button id="btn-galaxy"  class="btn-icon" title="Galaxy Map"><i class="fa-solid fa-map"></i></button>
-      <button id="btn-battles" class="btn-icon" title="Battle Log"><i class="fa-solid fa-skull-crossbones"></i></button>
-      <button id="btn-chat"    class="btn-icon" title="Comms"><i class="fa-solid fa-satellite-dish"></i></button>
-      <button id="btn-admin"   class="btn-icon text-purple-400 hidden" title="Admin Panel"><i class="fa-solid fa-shield-halved"></i></button>
-      <button id="btn-logout"  class="btn-icon text-red-400" title="Logout"><i class="fa-solid fa-sign-out-alt"></i></button>
+      <button id="btn-galaxy"  class="btn-icon desktop-only" title="Galaxy Map"><i class="fa-solid fa-map"></i></button>
+      <button id="btn-battles" class="btn-icon desktop-only" title="Battle Log"><i class="fa-solid fa-skull-crossbones"></i></button>
+      <button id="btn-chat"    class="btn-icon desktop-only" title="Comms"><i class="fa-solid fa-satellite-dish"></i></button>
+      <button id="btn-admin"   class="btn-icon text-purple-400 hidden desktop-only" title="Admin Panel"><i class="fa-solid fa-shield-halved"></i></button>
+      <button id="btn-logout"  class="btn-icon text-red-400 desktop-only" title="Logout"><i class="fa-solid fa-sign-out-alt"></i></button>
     </div>
   </header>
 
   <!-- ── LEFT BUILD PANEL ──────────────────────────────────── -->
   <aside id="build-panel" class="absolute left-0 top-14 bottom-0 z-20 w-56 glass-side flex flex-col gap-2 p-3 overflow-y-auto">
-    <p class="text-xs text-slate-400 uppercase tracking-widest mb-1 px-1">Construction</p>
+    <!-- Sheet drag handle (mobile only) -->
+    <div class="sheet-handle mobile-only"></div>
+    <div class="flex items-center justify-between mb-1 px-1">
+      <p class="text-xs text-slate-400 uppercase tracking-widest">Construction</p>
+      <button id="build-panel-close" class="mobile-only text-slate-500 hover:text-white text-sm"><i class="fa-solid fa-xmark"></i></button>
+    </div>
 
     <div class="sys-info-row">
       <span class="text-slate-300 text-xs">Star</span>
@@ -118,6 +127,8 @@
 
   <!-- ── PLANET DETAIL PANEL (right) ──────────────────────── -->
   <aside id="planet-panel" class="absolute right-0 top-14 bottom-0 z-20 w-60 glass-side flex-col gap-3 p-4 overflow-y-auto hidden">
+    <!-- Sheet drag handle (mobile only) -->
+    <div class="sheet-handle mobile-only mb-0"></div>
     <div class="flex items-center gap-2 mb-1">
       <div id="planet-icon" class="w-10 h-10 rounded-full border-2 border-white/20 flex items-center justify-center text-xl"></div>
       <div class="flex-1 min-w-0">
@@ -141,10 +152,21 @@
       <i class="fa-solid fa-arrow-up mr-1"></i>Upgrade <span id="upgrade-cost" class="text-xs opacity-70"></span>
     </button>
     <p id="upgrade-status" class="text-xs text-center text-slate-400 hidden"></p>
+
+    <!-- Council lockout banner -->
+    <div id="council-watch-panel" class="hidden flex-col items-center gap-1 rounded-xl bg-red-950/60 border border-red-800/50 px-3 py-2.5 text-center">
+      <p class="text-xs font-black uppercase tracking-widest text-red-400">👁 Under Council Watch</p>
+      <p class="text-xs text-slate-300">This planet may not be upgraded until</p>
+      <p id="council-watch-timer" class="text-lg font-black text-red-300 tabular-nums">0h 0m 0s</p>
+      <p class="text-[10px] text-slate-500">passive income continues as normal</p>
+    </div>
     <button id="btn-inspect-planet" class="btn-secondary text-sm mt-1">
       <i class="fa-solid fa-magnifying-glass mr-1"></i>Inspect Planet
     </button>
   </aside>
+
+  <!-- ── BUILD SHEET BACKDROP (mobile) ──────────────────────── -->
+  <div id="build-sheet-backdrop" class="hidden fixed inset-0 z-[34] md:hidden bg-black/40"></div>
 
   <!-- ── ORBIT SLOT PICKER (modal) ─────────────────────────── -->
   <div id="orbit-modal" class="hidden fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
@@ -439,6 +461,16 @@
     </div>
   </div>
 
+  <!-- ── MOBILE BOTTOM NAV ──────────────────────────────────── -->
+  <nav id="bottom-nav">
+    <button id="nav-build"   class="nav-tab" title="Build"><i class="fa-solid fa-hammer"></i><span>Build</span></button>
+    <button id="nav-galaxy"  class="nav-tab" title="Galaxy"><i class="fa-solid fa-map"></i><span>Galaxy</span></button>
+    <button id="nav-battles" class="nav-tab" title="Battles"><i class="fa-solid fa-skull-crossbones"></i><span>Battles</span></button>
+    <button id="nav-chat"    class="nav-tab" title="Comms"><i class="fa-solid fa-satellite-dish"></i><span>Comms</span></button>
+    <button id="nav-admin"   class="nav-tab nav-tab-purple hidden" title="Admin"><i class="fa-solid fa-shield-halved"></i><span>Admin</span></button>
+    <button id="nav-logout"  class="nav-tab nav-tab-danger" title="Logout"><i class="fa-solid fa-sign-out-alt"></i><span>Quit</span></button>
+  </nav>
+
 </div><!-- /game-screen -->
 
 <!-- ── ULTIMATE UNIVERSE COUNCIL MODAL ──────────────────────── -->
@@ -447,7 +479,7 @@
 
     <!-- Avatar panel -->
     <div id="council-avatar-panel" class="relative flex-shrink-0 flex items-end justify-center sm:w-56 min-h-48 sm:min-h-0 bg-gradient-to-b from-indigo-950 to-black overflow-hidden">
-      <img src="/assets/council-avatar.png" alt="The Council"
+      <img src="/assets/avatars/Ultimate Universe Counsil.png" alt="The Council"
            class="absolute inset-0 w-full h-full object-cover object-top opacity-90"
            onerror="this.style.display='none'" />
       <div class="relative z-10 w-full py-3 px-4 text-center" style="background:linear-gradient(transparent,rgba(0,0,0,0.85))">

@@ -82,7 +82,7 @@ app.get('*', (_, res) => res.sendFile(path.join(__dirname, 'public', 'index.html
 
 server.on('error', err => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`\n  ✖  Port ${PORT} is already in use. Run: lsof -ti :${PORT} | xargs kill -9\n`);
+    console.error(`\n  ✖  Port ${PORT} is already in use. Run: netstat -aon | findstr :${PORT}  then  taskkill /F /PID <pid>\n`);
     process.exit(1);
   } else throw err;
 });

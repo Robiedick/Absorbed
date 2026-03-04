@@ -82,7 +82,7 @@ export class SolarSystemRenderer {
     this.app.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.12 : 0.89;
-      this._worldScale = Math.max(0.3, Math.min(4.0, this._worldScale * factor));
+      this._worldScale = Math.max(0.3, Math.min(8.0, this._worldScale * factor));
       this._world.scale.set(this._worldScale);
     }, { passive: false });
 
@@ -111,6 +111,37 @@ export class SolarSystemRenderer {
     cv.addEventListener('pointerup',     endPan);
     cv.addEventListener('pointercancel', endPan);
 
+    // ── Pinch-to-zoom (two-finger touch) ───────────────────────────────────
+    let _pinchStartDist  = null;
+    let _pinchStartScale = 1;
+    let _pinchMidX = 0, _pinchMidY = 0;  // midpoint of the two fingers
+    cv.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        this._isPanning = false;
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        _pinchStartDist  = Math.hypot(dx, dy);
+        _pinchStartScale = this._worldScale;
+        _pinchMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        _pinchMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      }
+    }, { passive: false });
+    cv.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2 && _pinchStartDist !== null) {
+        e.preventDefault();
+        const dx   = e.touches[0].clientX - e.touches[1].clientX;
+        const dy   = e.touches[0].clientY - e.touches[1].clientY;
+        const dist = Math.hypot(dx, dy);
+        const factor   = dist / _pinchStartDist;
+        this._worldScale = Math.max(0.25, Math.min(10.0, _pinchStartScale * factor));
+        this._world.scale.set(this._worldScale);
+      }
+    }, { passive: false });
+    cv.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) _pinchStartDist = null;
+    }, { passive: true });
+
     this.app.ticker.add(this._tick.bind(this));
     window.addEventListener('resize', () => {
       this.app.renderer.resize(window.innerWidth, window.innerHeight);
@@ -121,10 +152,11 @@ export class SolarSystemRenderer {
   }
 
   // Visible area dimensions (accounting for left panel + top HUD)
-  get _leftPanel() { return 224; }   // w-56 = 224px
+  get _leftPanel() { return window.innerWidth >= 768 ? 224 : 0; }  // 0 on mobile (sheet)
   get _topHUD()    { return 56;  }   // header bar height
+  get _bottomNav() { return window.innerWidth < 768 ? 64 : 0; }    // mobile bottom nav
   get _visW()  { return this.app.screen.width  - this._leftPanel; }
-  get _visH()  { return this.app.screen.height - this._topHUD; }
+  get _visH()  { return this.app.screen.height - this._topHUD - this._bottomNav; }
   // Centre of the VISIBLE area (what the player actually sees)
   get cx() { return this._leftPanel + this._visW / 2; }
   get cy() { return this._topHUD   + this._visH / 2; }
@@ -329,7 +361,7 @@ export class SolarSystemRenderer {
       // ── 3D path – texture is a live canvas that Three.js updates each frame ──
       const sizeScale = planet.size_scale != null ? Number(planet.size_scale) : 1.0;
       // Cap size so even large sizeScale planets stay within orbit ring spacing
-      const size      = Math.min(72, Math.max(20, (9 + planet.level * 2.2) * 2.4 * sizeScale));
+      const size      = Math.min(144, Math.max(24, (9 + planet.level * 2.2) * 2.4 * sizeScale));
 
       const wrap = new PIXI.Container();
       const sprite = new PIXI.Sprite(tex);

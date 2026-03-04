@@ -206,6 +206,54 @@ function wireGameUI() {
   document.getElementById('battle-dismiss').addEventListener('click', () => {
     document.getElementById('battle-overlay').classList.add('hidden');
   });
+
+  wireMobileNav();
+}
+
+// ── Mobile bottom nav wiring ──────────────────────────────────────────────────
+function wireMobileNav() {
+  const buildPanel = document.getElementById('build-panel');
+  const backdrop   = document.getElementById('build-sheet-backdrop');
+
+  const openBuildSheet = () => {
+    if (selectedPlanet) closePlanetPanel();
+    buildPanel.classList.add('sheet-open');
+    backdrop.classList.remove('hidden');
+  };
+  const closeBuildSheet = () => {
+    buildPanel.classList.remove('sheet-open');
+    backdrop.classList.add('hidden');
+  };
+
+  document.getElementById('nav-build').addEventListener('click', () => {
+    audio.click();
+    buildPanel.classList.contains('sheet-open') ? closeBuildSheet() : openBuildSheet();
+  });
+  document.getElementById('build-panel-close')?.addEventListener('click', () => closeBuildSheet());
+  backdrop.addEventListener('click', () => closeBuildSheet());
+
+  document.getElementById('nav-galaxy').addEventListener('click',  () => { audio.click(); closeBuildSheet(); openGalaxy(); });
+  document.getElementById('nav-battles').addEventListener('click', () => { audio.click(); closeBuildSheet(); openBattleLog(); });
+  document.getElementById('nav-chat').addEventListener('click', () => {
+    audio.click();
+    closeBuildSheet();
+    const p = document.getElementById('chat-panel');
+    p.classList.toggle('hidden');
+    if (!p.classList.contains('hidden')) document.getElementById('chat-input').focus();
+  });
+  document.getElementById('nav-admin')?.addEventListener('click', () => {
+    audio.click();
+    closeBuildSheet();
+    openAdminPanel();
+  });
+  document.getElementById('nav-logout').addEventListener('click', () => {
+    clearInterval(pollTimer);
+    clearInterval(adminRefreshTimer);
+    localStorage.clear();
+    socket?.disconnect();
+    showAuth();
+    audio.click();
+  });
 }
 
 // ── Planet type picker (left panel) ──────────────────────────────────────────
@@ -227,6 +275,11 @@ function selectPlanetType(type) {
   pendingBuildType = type;
   document.getElementById('orbit-modal-type').textContent = type;
   buildOrbitSlotList();
+  // Close build sheet on mobile before showing orbit picker
+  if (window.innerWidth < 768) {
+    document.getElementById('build-panel').classList.remove('sheet-open');
+    document.getElementById('build-sheet-backdrop').classList.add('hidden');
+  }
   document.getElementById('orbit-modal').classList.remove('hidden');
   gsap.from('#orbit-modal > div', { opacity: 0, scale: 0.9, duration: 0.25, ease: 'back.out(1.7)' });
 }
@@ -297,26 +350,74 @@ function onPlanetClick(planet) {
   const ATTACK_W = { rocky: 1.2, volcanic: 2, crystal: 1.5, gas: 0.8, ocean: 0.9, ice: 0.7 };
   document.getElementById('p-atk').textContent          = `${Math.round(planet.level * (ATTACK_W[planet.type] || 1) * 10)}`;
 
-  // Upgrade cost preview
-  const nextLvl = planet.level + 1;
+  // Upgrade cost preview (matches server BUILD_CONFIG: scale = level² for L1-5, 25×3^(level-5) for L6+)
+  const upScale = planet.level <= 5
+    ? planet.level * planet.level
+    : 25 * Math.pow(3, planet.level - 5);
+  const upCost = { m: Math.round(280 * upScale), e: Math.round(200 * upScale), c: Math.round(70 * upScale) };
   document.getElementById('upgrade-cost').textContent =
-    `(M:${nextLvl * 60} E:${nextLvl * 45} C:${nextLvl * 15})`;
+    `(M:${upCost.m} E:${upCost.e} C:${upCost.c})`;
 
-  const inQueue = (gameState?.queue || []).some(q => q.planet_id === planet.id && !q.done);
-  document.getElementById('btn-upgrade-planet').disabled  = inQueue;
+  const inQueue  = (gameState?.queue || []).some(q => q.planet_id === planet.id && !q.done);
+  const nowSec   = Math.floor(Date.now() / 1000);
+  const isLocked = (planet.council_denied_until || 0) > nowSec;
+
+  document.getElementById('btn-upgrade-planet').disabled = inQueue || isLocked;
+
+  // Queue status (in-progress text)
   document.getElementById('upgrade-status').classList.toggle('hidden', !inQueue);
-  document.getElementById('upgrade-status').textContent   = inQueue ? '⏳ Upgrade in progress…' : '';
+  document.getElementById('upgrade-status').textContent = inQueue ? '⏳ Upgrade in progress…' : '';
 
-  panel.classList.remove('hidden');
-  gsap.from(panel, { x: 30, opacity: 0, duration: 0.3, ease: 'power2.out' });
+  // Council watch banner
+  const watchPanel = document.getElementById('council-watch-panel');
+  watchPanel.classList.toggle('hidden', !isLocked);
+  watchPanel.classList.toggle('flex', isLocked);
+  if (isLocked) {
+    // Clear any previous ticker
+    if (window._councilTicker) clearInterval(window._councilTicker);
+    const deniedUntil = planet.council_denied_until;
+    const tick = () => {
+      const s = Math.max(0, deniedUntil - Math.floor(Date.now() / 1000));
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = s % 60;
+      document.getElementById('council-watch-timer').textContent = `${h}h ${m}m ${sec}s`;
+      if (s <= 0) {
+        clearInterval(window._councilTicker);
+        watchPanel.classList.add('hidden');
+        watchPanel.classList.remove('flex');
+        document.getElementById('btn-upgrade-planet').disabled = false;
+      }
+    };
+    tick();
+    window._councilTicker = setInterval(tick, 1000);
+  } else {
+    if (window._councilTicker) { clearInterval(window._councilTicker); window._councilTicker = null; }
+  }
+
+  if (window.innerWidth < 768) {
+    // Mobile: CSS transition slides sheet up from bottom
+    document.getElementById('build-panel').classList.remove('sheet-open');
+    document.getElementById('build-sheet-backdrop').classList.add('hidden');
+    panel.classList.remove('hidden');
+  } else {
+    panel.classList.remove('hidden');
+    gsap.from(panel, { x: 30, opacity: 0, duration: 0.3, ease: 'power2.out' });
+  }
 }
 
 function closePlanetPanel() {
   selectedPlanet = null;
+  if (window._councilTicker) { clearInterval(window._councilTicker); window._councilTicker = null; }
   const panel = document.getElementById('planet-panel');
-  gsap.to(panel, { x: 30, opacity: 0, duration: 0.2, onComplete: () => {
-    panel.classList.add('hidden'); panel.style.opacity = 1; panel.style.transform = '';
-  }});
+  if (window.innerWidth < 768) {
+    // Mobile: CSS transition slides sheet back down
+    panel.classList.add('hidden');
+  } else {
+    gsap.to(panel, { x: 30, opacity: 0, duration: 0.2, onComplete: () => {
+      panel.classList.add('hidden'); panel.style.opacity = 1; panel.style.transform = '';
+    }});
+  }
 }
 // ── Ultimate Universe Council modal ─────────────────────────────────────────────────
 function openCouncilModal(planet) {
@@ -344,21 +445,38 @@ function openCouncilModal(planet) {
   api.upgradePlanet(planet.id).then(res => {
     _fillCouncilModal(res, planet);
   }).catch(err => {
-    // Hard error (not enough resources, already queued, etc.)
+    // Hard error — could be lockout, resources, already queued, etc.
     loading.classList.add('hidden');
     loading.classList.remove('flex');
     body.classList.remove('hidden');
-    body.textContent = err.message || 'An error occurred.';
+
+    // Parse lockout specifically
+    let isLockout = false;
+    let lockoutMsg = err.message || 'An error occurred.';
+    try {
+      // api._req throws with err.message = server's error string
+      if (lockoutMsg === 'council_lockout') { isLockout = true; lockoutMsg = 'The Council has banned this petition. Try again later.'; }
+    } catch {}
+
+    body.textContent = lockoutMsg;
     header.classList.remove('hidden');
-    document.getElementById('council-verdict-icon').textContent  = '\u26A0\uFE0F';
-    document.getElementById('council-verdict-label').textContent = 'Request Failed';
+    document.getElementById('council-verdict-icon').textContent  = isLockout ? '\uD83D\uDCDC' : '\u26A0\uFE0F';
+    document.getElementById('council-verdict-label').textContent = isLockout ? 'PETITION BANNED' : 'Request Failed';
     document.getElementById('council-verdict-label').className   = 'text-base font-black uppercase tracking-widest text-red-400';
     document.getElementById('council-verdict-sub').textContent   = '';
-    document.getElementById('council-seal').textContent          = '\u274C';
+    document.getElementById('council-seal').textContent          = isLockout ? '\u231B' : '\u274C';
     document.getElementById('council-divider').classList.remove('hidden');
     dismiss.textContent = 'Dismiss';
     dismiss.disabled    = false;
     dismiss.className   = 'w-full py-2.5 rounded-xl text-sm font-bold tracking-wide transition-all bg-slate-800 hover:bg-slate-700 text-slate-300';
+    const newBtn = dismiss.cloneNode(true);
+    newBtn.textContent = 'Dismiss'; newBtn.disabled = false;
+    newBtn.className = dismiss.className;
+    dismiss.replaceWith(newBtn);
+    newBtn.addEventListener('click', () => {
+      document.getElementById('council-modal').classList.add('hidden');
+      loadAndRender(); // refresh panel so lockout countdown shows
+    });
     audio.error?.();
   });
 }
@@ -417,6 +535,7 @@ function _fillCouncilModal(res, planet) {
       await loadAndRender();
     } else {
       toast('\uD83D\uDCDC The Council has spoken. Upgrade denied.', 'red');
+      await loadAndRender(); // refresh panel so lockout countdown appears
     }
   });
 
@@ -613,7 +732,9 @@ async function loadAndRender() {
   document.getElementById('star-info').textContent = `Lv ${sys.star_level} — ${starTypes[sys.star_type] || sys.star_type}`;
 
   const nextStar = sys.star_level;
-  document.getElementById('star-cost').textContent = `M:${nextStar*80} E:${nextStar*50}`;
+  // Star upgrade cost matches server BUILD_CONFIG: level² × base
+  document.getElementById('star-cost').textContent =
+    `M:${nextStar*nextStar*1200} E:${nextStar*nextStar*800} C:${nextStar*nextStar*300}`;
 
   renderQueue(gameState.queue);
   renderer.render(gameState);
@@ -810,10 +931,18 @@ function showGame() {
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('game-screen').classList.remove('hidden');
   gsap.from('#game-screen header', { opacity: 0, y: -20, duration: 0.4, ease: 'power2.out' });
-  gsap.from('#build-panel', { opacity: 0, x: -30, duration: 0.4, delay: 0.1, ease: 'power2.out' });
+  if (window.innerWidth >= 768) {
+    gsap.from('#build-panel', { opacity: 0, x: -30, duration: 0.4, delay: 0.1, ease: 'power2.out' });
+  }
   const adminBtn = document.getElementById('btn-admin');
-  if (isAdmin) adminBtn.classList.remove('hidden');
-  else         adminBtn.classList.add('hidden');
+  const navAdmin = document.getElementById('nav-admin');
+  if (isAdmin) {
+    adminBtn.classList.remove('hidden');
+    navAdmin?.classList.remove('hidden');
+  } else {
+    adminBtn.classList.add('hidden');
+    navAdmin?.classList.add('hidden');
+  }
   connectSocket();
   startPoll();
 }

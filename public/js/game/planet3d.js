@@ -5,7 +5,7 @@ import * as THREE    from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const MODEL_PATH  = '/assets/planets/';
-const THUMB_SIZE  = 160;    // thumbnail canvas (px)
+const THUMB_SIZE  = 320;    // thumbnail canvas (px) — doubled so source is high-res
 const STAR_SIZE   = 512;    // star canvas (px) — kept high-res so it stays crisp when zoomed
 
 const FALLBACK_COLORS = {
@@ -159,7 +159,7 @@ class Planet3DManager {
     const texture = new PIXI.Texture({ source });
 
     const scene  = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 100); // wide FOV — captures moons at any orbit radius
     camera.position.z = 5.5;   // far enough back that even large models never clip canvas edges
     addLights(scene);
 
