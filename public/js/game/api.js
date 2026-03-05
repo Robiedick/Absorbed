@@ -38,6 +38,9 @@ export const api = {
   renameSystem:     (name)      => api._req('PATCH', '/api/game/rename-system', { name }),
   renamePlanet:     (id, name)  => api._req('PATCH', '/api/game/rename-planet', { planet_id: id, name }),
 
+  buildBuilding:    (pId, type)    => api.post('/api/game/build-building',    { planet_id: pId, type }),
+  tradeShipVisit:   ()             => api.post('/api/game/trade-ship-visit'),
+
   // Admin
   adminGetLogs:        (p)              => api.get(`/api/admin/logs?${new URLSearchParams(p)}`),
   adminClearLogs:      ()               => api._req('DELETE', '/api/admin/logs'),

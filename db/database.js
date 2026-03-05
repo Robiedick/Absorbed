@@ -84,6 +84,16 @@ CREATE TABLE IF NOT EXISTS logs (
   meta       TEXT,
   created_at INTEGER DEFAULT (unixepoch())
 );
+
+CREATE TABLE IF NOT EXISTS buildings (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  planet_id       INTEGER NOT NULL,
+  solar_system_id INTEGER NOT NULL,
+  type            TEXT    NOT NULL DEFAULT 'trade_center',
+  built_at        INTEGER DEFAULT (unixepoch()),
+  FOREIGN KEY (planet_id)       REFERENCES planets(id)       ON DELETE CASCADE,
+  FOREIGN KEY (solar_system_id) REFERENCES solar_systems(id) ON DELETE CASCADE
+);
 `);
 
 // ── Migrations (idempotent — safe to run on every boot) ───────────────────────
@@ -173,6 +183,29 @@ function tickResources(solarSystemId) {
     dEnergy  += (prod.energy  || 0) * p.level * elapsed;
     dMatter  += (prod.matter  || 0) * p.level * elapsed;
     dCredits += (prod.credits || 0) * p.level * elapsed;
+  }
+
+  // Building income (trade centers produce bonus resources per minute)
+  const buildings = db.prepare(`
+    SELECT b.type, p.type AS planet_type, p.orbit_index
+    FROM buildings b JOIN planets p ON b.planet_id = p.id
+    WHERE b.solar_system_id = ?
+  `).all(solarSystemId);
+  for (const b of buildings) {
+    if (b.type === 'trade_center') {
+      let be = 0, bm = 0, bc = 1.0; // +1 credit/min base
+      if (b.planet_type === 'rocky')    bm += 0.8;
+      if (b.planet_type === 'gas')      be += 0.8;
+      if (b.planet_type === 'ocean')    bc += 1.2;
+      if (b.planet_type === 'crystal')  bc += 2.0;
+      if (b.planet_type === 'volcanic') be += 0.6;
+      if (b.planet_type === 'ice')      bm += 0.4;
+      if (b.orbit_index <= 2) be += 0.3; // inner orbit energy bonus
+      if (b.orbit_index >= 5) bm += 0.3; // outer orbit matter bonus
+      dEnergy  += be * elapsed;
+      dMatter  += bm * elapsed;
+      dCredits += bc * elapsed;
+    }
   }
 
   const newEnergy  = Math.min(sys.energy  + dEnergy,  99999);

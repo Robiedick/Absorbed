@@ -15,6 +15,7 @@ const renderer = new SolarSystemRenderer(
 let gameState    = null;   // { solar_system, planets, queue }
 let selectedPlanet = null;
 let currentUser  = null;
+let currentUserId = null;  // numeric user id (decoded from JWT)
 let isAdmin      = false;
 let socket       = null;
 let pendingBuildType = null;  // planet type waiting for orbit selection
@@ -57,6 +58,7 @@ const PROD = {
     try {
       const pl = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
       if (pl.is_admin) { isAdmin = true; localStorage.setItem('absorbed_is_admin', '1'); }
+      if (pl.id) currentUserId = pl.id;
     } catch {}
   }
   if (token && username) {
@@ -132,6 +134,25 @@ function wireGameUI() {
     openAdminPanel();
   });
 
+  document.getElementById('btn-devpin').addEventListener('click', () => {
+    if (isAdmin) { toast('Developer mode already active', 'purple'); return; }
+    const pin = prompt('Enter developer PIN:');
+    if (pin === '4304') {
+      activateAdminMode();
+    } else if (pin !== null) {
+      toast('Wrong PIN', 'red');
+    }
+  });
+  document.getElementById('nav-devpin').addEventListener('click', () => {
+    if (isAdmin) { toast('Developer mode already active', 'purple'); return; }
+    const pin = prompt('Enter developer PIN:');
+    if (pin === '4304') {
+      activateAdminMode();
+    } else if (pin !== null) {
+      toast('Wrong PIN', 'red');
+    }
+  });
+
   document.getElementById('build-upgrade-star').addEventListener('click', async () => {
     audio.click();
     try {
@@ -147,6 +168,9 @@ function wireGameUI() {
   // Planet Viewer
   document.getElementById('btn-inspect-planet').addEventListener('click', () => {
     if (selectedPlanet) openPlanetViewer(selectedPlanet);
+  });
+  document.getElementById('btn-build-trade-center').addEventListener('click', () => {
+    if (selectedPlanet) buildTradeCenter(selectedPlanet);
   });
   document.getElementById('planet-viewer-close').addEventListener('click', closePlanetViewer);
   document.getElementById('btn-destroy-planet').addEventListener('click', () => {
@@ -291,6 +315,11 @@ function buildOrbitSlotList() {
     .filter(q => q.action === 'new_planet')
     .map(q => JSON.parse(q.payload || '{}').orbit_index)
     .filter(x => x != null);
+  const isFirstFree = (occupied.length === 0 && queued.length === 0);
+
+  // Show/hide the free-planet hint in the orbit modal
+  const hint = document.getElementById('orbit-free-hint');
+  if (hint) hint.classList.toggle('hidden', !isFirstFree);
 
   slots.innerHTML = '';
   for (let i = 0; i < 8; i++) {
@@ -298,8 +327,11 @@ function buildOrbitSlotList() {
     const btn = document.createElement('button');
     btn.className = `orbit-slot-btn ${isOccupied ? 'opacity-30 cursor-not-allowed' : ''}`;
     btn.disabled  = isOccupied;
+    const costLabel = isFirstFree && !isOccupied
+      ? '<span class="ml-auto text-xs text-green-400 font-bold">FREE · instant</span>'
+      : `<span class="ml-auto text-xs text-slate-500">${isOccupied ? '● occupied' : '○ free'}</span>`;
     btn.innerHTML = `<i class="fa-solid fa-ring text-indigo-400 mr-2"></i>Orbit ${i + 1}
-      <span class="ml-auto text-xs text-slate-500">${isOccupied ? '● occupied' : '○ free'}</span>`;
+      ${costLabel}`;
     if (!isOccupied) {
       btn.addEventListener('click', () => triggerBuildPlanet(i));
     }
@@ -315,7 +347,7 @@ async function triggerBuildPlanet(orbitIndex) {
     const res = await api.buildPlanet(orbitIndex, pendingBuildType);
     toast(`🚀 Building ${pendingBuildType} planet in Orbit ${orbitIndex + 1}!`, 'indigo');
     const eta = Math.ceil((res.complete_at - Date.now() / 1000));
-    toast(`⏱ Ready in ~${eta}s`, 'slate');
+    if (eta > 2) toast(`⏱ Ready in ~${eta}s`, 'slate');
     pendingBuildType = null;
     await loadAndRender();
   } catch (err) { toast(err.message, 'red'); audio.error(); }
@@ -357,6 +389,33 @@ function onPlanetClick(planet) {
   const upCost = { m: Math.round(280 * upScale), e: Math.round(200 * upScale), c: Math.round(70 * upScale) };
   document.getElementById('upgrade-cost').textContent =
     `(M:${upCost.m} E:${upCost.e} C:${upCost.c})`;
+
+  // Buildings section
+  const allBuildings = (gameState?.buildings || []).filter(b => b.planet_id === planet.id);
+  const maxSlots     = Math.max(1, Math.ceil((planet.size_scale || 1.0) * 1.5));
+  const usedSlots    = allBuildings.length;
+  document.getElementById('p-building-slots').textContent = `${usedSlots}/${maxSlots} slots used`;
+
+  const buildList = document.getElementById('p-building-list');
+  buildList.innerHTML = '';
+  if (allBuildings.length === 0) {
+    buildList.innerHTML = '<span class="text-[10px] text-slate-600">No buildings yet</span>';
+  } else {
+    for (const b of allBuildings) {
+      const item = document.createElement('div');
+      item.className = 'flex items-center gap-1.5 text-xs text-slate-300 bg-white/5 rounded px-2 py-1';
+      item.innerHTML = '<i class="fa-solid fa-store text-amber-400 text-[10px]"></i> Trade Center';
+      buildList.appendChild(item);
+    }
+  }
+
+  const totalPlanets = (gameState?.planets || []).length;
+  const slotsFull    = usedSlots >= maxSlots;
+  const btnTC        = document.getElementById('btn-build-trade-center');
+  const hintTC       = document.getElementById('trade-center-hint');
+  btnTC.disabled = totalPlanets < 2 || slotsFull;
+  btnTC.classList.toggle('opacity-40', totalPlanets < 2 || slotsFull);
+  hintTC.classList.toggle('hidden', totalPlanets >= 2);
 
   const inQueue  = (gameState?.queue || []).some(q => q.planet_id === planet.id && !q.done);
   const nowSec   = Math.floor(Date.now() / 1000);
@@ -411,13 +470,22 @@ function closePlanetPanel() {
   if (window._councilTicker) { clearInterval(window._councilTicker); window._councilTicker = null; }
   const panel = document.getElementById('planet-panel');
   if (window.innerWidth < 768) {
-    // Mobile: CSS transition slides sheet back down
     panel.classList.add('hidden');
   } else {
     gsap.to(panel, { x: 30, opacity: 0, duration: 0.2, onComplete: () => {
       panel.classList.add('hidden'); panel.style.opacity = 1; panel.style.transform = '';
     }});
   }
+}
+
+// ── Build Trade Center ────────────────────────────────────────────────────────
+async function buildTradeCenter(planet) {
+  audio.build?.();
+  try {
+    const res = await api.buildBuilding(planet.id, 'trade_center');
+    toast(`🏪 Trade Center built on ${planet.name}!`, 'amber');
+    await loadAndRender();
+  } catch (err) { toast(err.message, 'red'); audio.error?.(); }
 }
 // ── Ultimate Universe Council modal ─────────────────────────────────────────────────
 function openCouncilModal(planet) {
@@ -728,6 +796,36 @@ async function loadAndRender() {
   document.getElementById('res-credits').textContent = fmt(sys.credits);
   document.getElementById('sys-name-label').textContent = sys.name;
 
+  // Admin: per-resource edit pencil buttons in HUD (re-inject each render)
+  if (isAdmin) {
+    [['energy','res-energy'],['matter','res-matter'],['credits','res-credits']].forEach(([res, elId]) => {
+      const badge = document.getElementById(elId)?.closest('.res-badge');
+      if (!badge || badge.querySelector('.admin-res-edit')) return;
+      const btn = document.createElement('button');
+      btn.className = 'admin-res-edit text-[9px] text-purple-400 hover:text-purple-200 ml-0.5 leading-none';
+      btn.title = `Set ${res}`;
+      btn.innerHTML = '&#9998;';
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const cur = Math.round(gameState?.solar_system?.[res] ?? 0);
+        const raw = prompt(`Set ${res} (current: ${cur}):`, cur);
+        if (raw === null) return;
+        const v = Math.max(0, Math.min(999999, parseInt(raw) || 0));
+        try {
+          await api.adminSetResources(
+            currentUserId,
+            res === 'energy'  ? v : null,
+            res === 'matter'  ? v : null,
+            res === 'credits' ? v : null,
+          );
+          toast(`\u2705 ${res} \u2192 ${v}`, 'purple');
+          await loadAndRender();
+        } catch (err) { toast(err.message, 'red'); }
+      });
+      badge.appendChild(btn);
+    });
+  }
+
   const starTypes = { yellow_dwarf: 'Yellow Dwarf', red_dwarf: 'Red Dwarf', blue_giant: 'Blue Giant', white_dwarf: 'White Dwarf', neutron: 'Neutron' };
   document.getElementById('star-info').textContent = `Lv ${sys.star_level} — ${starTypes[sys.star_type] || sys.star_type}`;
 
@@ -737,6 +835,11 @@ async function loadAndRender() {
     `M:${nextStar*nextStar*1200} E:${nextStar*nextStar*800} C:${nextStar*nextStar*300}`;
 
   renderQueue(gameState.queue);
+
+  // Sync trade ships with number of trade centers built
+  const tradeCenterCount = (gameState.buildings || []).filter(b => b.type === 'trade_center').length;
+  renderer.setTradeShipCount(tradeCenterCount, gameState.planets);
+
   renderer.render(gameState);
 
   // Update open planet panel if still open
@@ -747,9 +850,29 @@ async function loadAndRender() {
 }
 
 function renderQueue(queue = []) {
-  const el = document.getElementById('build-queue-list');
+  const el         = document.getElementById('build-queue-list');
+  const skipAllBtn = document.getElementById('queue-skip-all');
   el.innerHTML = '';
   const active = queue.filter(q => !q.done);
+
+  // Admin skip-all button — re-clone to clear stale listeners
+  if (skipAllBtn) {
+    if (isAdmin && active.length) {
+      skipAllBtn.classList.remove('hidden');
+      const fresh = skipAllBtn.cloneNode(true);
+      skipAllBtn.replaceWith(fresh);
+      fresh.addEventListener('click', async () => {
+        try {
+          await api.adminCompleteQueue(undefined);
+          toast('⚡ All timers skipped!', 'purple');
+          await loadAndRender();
+        } catch (err) { toast(err.message, 'red'); }
+      });
+    } else {
+      skipAllBtn.classList.add('hidden');
+    }
+  }
+
   if (!active.length) { el.innerHTML = '<span class="text-slate-600 text-xs px-1">No active builds</span>'; return; }
   for (const item of active) {
     const secsLeft = Math.max(0, item.complete_at - Math.floor(Date.now() / 1000));
@@ -758,8 +881,26 @@ function renderQueue(queue = []) {
                    : item.action === 'upgrade_star'   ? 'Star upgrade' : item.action;
     const div = document.createElement('div');
     div.className = 'queue-item';
-    div.innerHTML = `<span class="truncate capitalize">${label}</span>
-      <span class="queue-eta" data-eta="${item.complete_at}">⏱ ${secsLeft}s</span>`;
+    const etaSpan = document.createElement('span');
+    etaSpan.className = 'queue-eta';
+    etaSpan.dataset.eta = item.complete_at;
+    etaSpan.textContent = secsLeft > 0 ? `⏱ ${secsLeft}s` : '✅ Done!';
+    div.innerHTML = `<span class="truncate capitalize">${label}</span>`;
+    div.appendChild(etaSpan);
+    if (isAdmin) {
+      const skip = document.createElement('button');
+      skip.innerHTML = '⚡';
+      skip.title = 'Skip all timers';
+      skip.className = 'ml-1 text-yellow-400 hover:text-yellow-100 text-sm font-bold leading-none shrink-0';
+      skip.addEventListener('click', async () => {
+        try {
+          await api.adminCompleteQueue(undefined);
+          toast('⚡ Skipped!', 'purple');
+          await loadAndRender();
+        } catch (err) { toast(err.message, 'red'); }
+      });
+      div.appendChild(skip);
+    }
     el.appendChild(div);
   }
 }
@@ -945,6 +1086,53 @@ function showGame() {
   }
   connectSocket();
   startPoll();
+}
+
+// ── Admin mode activation (PIN-gated) ───────────────────────────────────────
+function activateAdminMode() {
+  isAdmin = true;
+  // Show admin button + nav
+  document.getElementById('btn-admin')?.classList.remove('hidden');
+  document.getElementById('nav-admin')?.classList.remove('hidden');
+  // Unlock icon → unlocked (desktop + mobile)
+  ['btn-devpin', 'nav-devpin'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = id === 'btn-devpin'
+      ? '<i class="fa-solid fa-lock-open"></i>'
+      : '<i class="fa-solid fa-lock-open"></i><span>Dev</span>';
+    el.classList.add('text-purple-400');
+    el.classList.remove('text-slate-600', 'text-slate-500', 'hover:text-slate-300');
+    el.title = 'Developer mode active';
+  });
+  // Re-render queue to show skip buttons
+  if (gameState) renderQueue(gameState.queue);
+  // Inject resource edit pencils
+  if (gameState) {
+    const sys = gameState.solar_system;
+    [['energy','res-energy'],['matter','res-matter'],['credits','res-credits']].forEach(([res, elId]) => {
+      const badge = document.getElementById(elId)?.closest('.res-badge');
+      if (!badge || badge.querySelector('.admin-res-edit')) return;
+      const btn = document.createElement('button');
+      btn.className = 'admin-res-edit text-[10px] text-purple-400 hover:text-purple-200 ml-1 leading-none';
+      btn.title = `Set ${res}`;
+      btn.innerHTML = '&#9998;';
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const cur = Math.round(gameState?.solar_system?.[res] ?? 0);
+        const raw = prompt(`Set ${res} (current: ${cur}):`, cur);
+        if (raw === null) return;
+        const v = Math.max(0, Math.min(999999, parseInt(raw) || 0));
+        try {
+          await api.adminSetResources(currentUserId, res==='energy'?v:null, res==='matter'?v:null, res==='credits'?v:null);
+          toast(`\u2705 ${res} \u2192 ${v}`, 'purple');
+          await loadAndRender();
+        } catch (err) { toast(err.message, 'red'); }
+      });
+      badge.appendChild(btn);
+    });
+  }
+  toast('\uD83D\uDD13 Developer mode active', 'purple');
 }
 
 // ── Admin Panel ───────────────────────────────────────────────────────────────

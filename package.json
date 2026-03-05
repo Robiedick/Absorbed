@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "prestart": "node -e \"const {execSync}=require('child_process');try{const p=execSync('netstat -aon').toString().split('\\n').filter(l=>l.includes(':3000 ')).map(l=>l.trim().split(/\\s+/).at(-1)).filter(pid=>pid&&pid!=='0'&&/^\\d+$/.test(pid));p.forEach(pid=>execSync('taskkill /F /PID '+pid))}catch(e){}\"",
+    "predev":   "node -e \"const {execSync}=require('child_process');try{const p=execSync('netstat -aon').toString().split('\\n').filter(l=>l.includes(':3000 ')).map(l=>l.trim().split(/\\s+/).at(-1)).filter(pid=>pid&&pid!=='0'&&/^\\d+$/.test(pid));p.forEach(pid=>execSync('taskkill /F /PID '+pid))}catch(e){}\"",
     "start": "npm run css:build && node server.js",
     "dev": "npm run css:build && concurrently --names \"SERVER,CSS\" --prefix-colors \"cyan,yellow\" \"nodemon server.js\" \"npm run css:watch\"",
     "css:build": "tailwindcss -i ./src/styles.css -o ./public/css/styles.css",

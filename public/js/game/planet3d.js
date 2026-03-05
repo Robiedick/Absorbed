@@ -5,8 +5,17 @@ import * as THREE    from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const MODEL_PATH  = '/assets/planets/';
-const THUMB_SIZE  = 320;    // thumbnail canvas (px) — doubled so source is high-res
+const SHIP_PATH   = '/assets/ships/';
+const THUMB_SIZE  = 640;    // thumbnail canvas (px) — 2× supersampled for crisp planets
 const STAR_SIZE   = 512;    // star canvas (px) — kept high-res so it stays crisp when zoomed
+const SHIP_LIVE_SIZE = 48;   // live per-ship render canvas (px)
+// Per-model nose-forward correction (rotate model so nose faces −Z in Three.js world,
+// which appears at the TOP of the rendered canvas image).
+const SHIP_ROT_Y = {
+  'Trade_Ship_1.glb':  Math.PI,        // nose originally +Z → flip 180°
+  'Trade_Ship_2.glb':  Math.PI / 2,    // nose originally −X → rotate 90°
+  'Trade_Ship_3.glb':  Math.PI / 2,    // same assumption; adjust if still off
+};
 
 const FALLBACK_COLORS = {
   rocky: 0x8B7355, gas: 0xE8A87C, ocean: 0x1E6BA8,
@@ -72,13 +81,19 @@ class Planet3DManager {
     this._vMixers       = [];
     this._vActive       = false;
     this._vFrameId      = null;
+
+    // Ship live renderer (shared WebGL context — re-renders every frame per ship)
+    this._shipRenderer    = null;
+    this._shipModelCache  = new Map(); // filename → THREE.Group (base, cloned per ship)
+    this._shipLoading     = new Map(); // filename → Promise
+    this._shipScenes      = new Map(); // shipId  → live entry
   }
 
   async init() {
     try {
       this._renderer = new THREE.WebGLRenderer({
         alpha: true,
-        antialias: false,           // not needed for small thumbnails
+        antialias: true,            // MSAA for smooth planet edges
         preserveDrawingBuffer: true, // REQUIRED — lets ctx.drawImage read the GL canvas
         powerPreference: 'low-power',
       });
@@ -98,6 +113,17 @@ class Planet3DManager {
 
       this._available = true;
       console.log('[Planet3D] Three.js WebGL thumbnail renderer ready');
+
+      // Ship thumbnail renderer — separate small WebGL context for ship GLBs
+      this._shipRenderer = new THREE.WebGLRenderer({
+        alpha: true,
+        antialias: true,
+        preserveDrawingBuffer: true,
+        powerPreference: 'low-power',
+      });
+      this._shipRenderer.setSize(SHIP_LIVE_SIZE, SHIP_LIVE_SIZE);
+      this._shipRenderer.setPixelRatio(1);
+      this._shipRenderer.outputColorSpace = THREE.SRGBColorSpace;
     } catch (err) {
       console.warn('[Planet3D] WebGL unavailable — falling back to 2D sprites:', err.message);
     }
@@ -297,6 +323,156 @@ class Planet3DManager {
   unregisterPlanet(planetId) {
     const e = this._planets.get(planetId);
     if (e) { e.texture.destroy(); this._planets.delete(planetId); }
+  }
+
+  // ── Live per-ship rendering (Three.js per-frame → PixiJS texture) ──────────
+
+  // Load and cache the base model for a ship filename (shared across instances).
+  async _loadShipModel(filename) {
+    if (this._shipModelCache.has(filename)) return this._shipModelCache.get(filename);
+    if (this._shipLoading.has(filename))    return this._shipLoading.get(filename);
+
+    const p = this._loader.loadAsync(SHIP_PATH + filename)
+      .then(gltf => { const m = normaliseGltf(gltf.scene); this._shipModelCache.set(filename, m); return m; })
+      .catch(() => null);
+    this._shipLoading.set(filename, p);
+    return p;
+  }
+
+  // Register a live ship scene.  Returns a PIXI.Texture synchronously (initially blank,
+  // updated each frame via tickAllShips).  The texture is owned by this manager.
+  registerShip(shipId, modelFile) {
+    if (!this._available || !this._shipRenderer) return null;
+
+    // Canvas + PixiJS texture (will be drawn into every frame)
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = SHIP_LIVE_SIZE;
+    const ctx    = canvas.getContext('2d');
+    const source  = new PIXI.CanvasSource({ resource: canvas });
+    const texture = new PIXI.Texture({ source });
+
+    // Three.js scene for this ship instance
+    const scene  = new THREE.Scene();
+
+    // 3/4 angle camera: above + slightly from rear so ship body depth shows
+    const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 100);
+    camera.position.set(0, 2.3, 1.1);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(0, 0, 0);
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+    const key = new THREE.DirectionalLight(0xffffee, 2.2);
+    key.position.set(2, 4, -3); scene.add(key);
+    const rim = new THREE.DirectionalLight(0x88aaff, 0.7);
+    rim.position.set(-3, 1, 2); scene.add(rim);
+
+    // Thruster flame — PointLight + emissive glow sphere at the tail (-Z = nose forward → +Z = tail)
+    const thrusterLight = new THREE.PointLight(0xff7700, 6, 3.2);
+    thrusterLight.position.set(0, 0, 1.1);
+    const glowMat  = new THREE.MeshBasicMaterial({ color: 0xff9900, transparent: true, opacity: 0.9 });
+    const glowMesh = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), glowMat);
+    glowMesh.position.set(0, 0, 1.1);
+    const outerMat  = new THREE.MeshBasicMaterial({ color: 0x3366ff, transparent: true, opacity: 0.35 });
+    const outerGlow = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), outerMat);
+    outerGlow.position.set(0, 0, 1.2);
+
+    // Pivot group — banking/pitch are applied here each frame
+    const pivot = new THREE.Group();
+    pivot.add(thrusterLight);
+    pivot.add(glowMesh);
+    pivot.add(outerGlow);
+    scene.add(pivot);
+
+    const entry = {
+      canvas, ctx, source, texture,
+      scene, camera, pivot,
+      mesh: null,            // filled in async once model loads
+      glowMesh, outerGlow, thrusterLight,
+      bank: 0, pitch: 0,
+      _thrustPhase: Math.random() * Math.PI * 2,
+      // Barrel roll state
+      barreling: false,
+      barrelPhase: 0,
+      barrelSpeed: Math.PI * 2.8,  // ~1.4 full rotations/sec
+    };
+    this._shipScenes.set(shipId, entry);
+
+    // Load model async — pivot is already in scene so first frames show just flame
+    this._loadShipModel(modelFile).then(base => {
+      if (!base || !this._shipScenes.has(shipId)) return;
+      const mesh = base.clone(true);
+      // Rotate model so nose faces –Z (top of rendered canvas image)
+      // and tail (thruster) faces +Z.  Each model has its own nose axis — see SHIP_ROT_Y.
+      mesh.rotation.y = SHIP_ROT_Y[modelFile] ?? Math.PI;
+      entry.pivot.add(mesh);
+      entry.mesh = mesh;
+    });
+
+    return texture;
+  }
+
+  // Update the bank and pitch angles for a live ship (called each frame from renderer.js).
+  updateShipPose(shipId, bank, pitch) {
+    const e = this._shipScenes.get(shipId);
+    if (e) { e.bank = bank; e.pitch = pitch; }
+  }
+
+  // Trigger a barrel roll on a specific ship (called from renderer.js)
+  triggerBarrelRoll(shipId) {
+    const e = this._shipScenes.get(shipId);
+    if (e && !e.barreling) {
+      e.barreling   = true;
+      e.barrelPhase = 0;
+    }
+  }
+
+  // Render all live ship canvases — call ONCE per game tick from renderer.js.
+  tickAllShips(deltaTime) {
+    if (!this._available || !this._shipRenderer || !this._shipScenes.size) return;
+    const dt = deltaTime / 60;
+    for (const e of this._shipScenes.values()) {
+      e._thrustPhase += dt * 8;  // ~8 Hz flicker
+      // Banking / pitch — or barrel roll
+      if (e.barreling) {
+        e.barrelPhase += e.barrelSpeed * dt;
+        if (e.barrelPhase >= Math.PI * 2) {
+          e.barreling   = false;
+          e.barrelPhase = 0;
+        }
+        e.pivot.rotation.z = e.barrelPhase;  // full spin around roll axis
+        e.pivot.rotation.x = 0;
+      } else {
+        e.pivot.rotation.z = e.bank;
+        e.pivot.rotation.x = e.pitch * 0.4;
+      }
+      // Thruster pulse
+      const pulse = 0.7 + 0.3 * Math.sin(e._thrustPhase);
+      e.thrusterLight.intensity = 5 + 3 * pulse;
+      e.glowMesh.material.opacity = 0.75 + 0.2 * pulse;
+      e.outerGlow.material.opacity = 0.25 + 0.15 * pulse;
+      this._renderShipEntry(e);
+    }
+  }  // end tickAllShips
+
+  _renderShipEntry(e) {
+    this._shipRenderer.render(e.scene, e.camera);
+    e.ctx.clearRect(0, 0, SHIP_LIVE_SIZE, SHIP_LIVE_SIZE);
+    e.ctx.drawImage(this._shipRenderer.domElement, 0, 0, SHIP_LIVE_SIZE, SHIP_LIVE_SIZE);
+    e.source.update();
+  }
+
+  // Returns the live texture for a registered ship (or null).
+  getShipTexture(shipId) {
+    return this._shipScenes.get(shipId)?.texture ?? null;
+  }
+
+  // Remove a ship's scene and release its texture.
+  unregisterShip(shipId) {
+    const e = this._shipScenes.get(shipId);
+    if (!e) return;
+    e.texture.destroy();
+    this._shipScenes.delete(shipId);
   }
 
   // ── Viewer ─────────────────────────────────────────────────────────────────

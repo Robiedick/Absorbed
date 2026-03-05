@@ -43,7 +43,7 @@ function generatePlanetVisuals(type) {
     model_file:    modelFile,
     self_rotation: rand(0.001, 0.012),
     orbital_speed: rand(0.5, 2.2),
-    size_scale:    rand(0.7, 1.5),
+    size_scale:    rand(0.4, 2.0),
     moon_count:    moonCount,
     moon_data:     JSON.stringify(moons),
   };
@@ -83,8 +83,9 @@ router.get('/state', auth, (req, res) => {
     WHERE solar_system_id = ? AND done = 0
     ORDER BY complete_at ASC
   `).all(sys.id);
+  const buildings = db.prepare('SELECT * FROM buildings WHERE solar_system_id = ?').all(sys.id);
 
-  res.json({ solar_system: updated, planets, queue });
+  res.json({ solar_system: updated, planets, queue, buildings });
 });
 
 // ── POST /api/game/build-planet ───────────────────────────────────────────────
@@ -112,22 +113,29 @@ router.post('/build-planet', auth, (req, res) => {
   ).get(sys.id, orbit_index);
   if (building) return res.status(409).json({ error: 'Already building in that orbit.' });
 
+  // If player has no planets and nothing queued, first planet is always free + instant
+  const planetCount = db.prepare('SELECT COUNT(*) as n FROM planets WHERE solar_system_id = ?').get(sys.id).n;
+  const queueCount  = db.prepare("SELECT COUNT(*) as n FROM build_queue WHERE solar_system_id = ? AND done = 0 AND action = 'new_planet'").get(sys.id).n;
+  const isFirstFree = (planetCount === 0 && queueCount === 0);
+
   // Tick then deduct resources
   const updated = tickResources(sys.id);
   const { cost, time } = BUILD_CONFIG.new_planet;
 
-  if (updated.matter < cost.matter || updated.energy < cost.energy || updated.credits < cost.credits) {
-    glog(req, 'BUILD_PLANET_FAIL', `Not enough resources for ${type} planet (orbit ${orbit_index})`, LEVELS.WARN, { need: cost, have: { matter: updated.matter, energy: updated.energy, credits: updated.credits } });
-    return res.status(400).json({ error: 'Not enough resources.', need: cost, have: { matter: updated.matter, energy: updated.energy, credits: updated.credits } });
+  if (!isFirstFree) {
+    if (updated.matter < cost.matter || updated.energy < cost.energy || updated.credits < cost.credits) {
+      glog(req, 'BUILD_PLANET_FAIL', `Not enough resources for ${type} planet (orbit ${orbit_index})`, LEVELS.WARN, { need: cost, have: { matter: updated.matter, energy: updated.energy, credits: updated.credits } });
+      return res.status(400).json({ error: 'Not enough resources.', need: cost, have: { matter: updated.matter, energy: updated.energy, credits: updated.credits } });
+    }
+    db.prepare(`
+      UPDATE solar_systems SET matter = matter - ?, energy = energy - ?, credits = credits - ?
+      WHERE id = ?
+    `).run(cost.matter, cost.energy, cost.credits, sys.id);
   }
 
-  db.prepare(`
-    UPDATE solar_systems SET matter = matter - ?, energy = energy - ?, credits = credits - ?
-    WHERE id = ?
-  `).run(cost.matter, cost.energy, cost.credits, sys.id);
-
   const name = faker.science.chemicalElement().name;
-  const completeAt = Math.floor(Date.now() / 1000) + time;
+  // First planet completes instantly; otherwise normal build time
+  const completeAt = isFirstFree ? Math.floor(Date.now() / 1000) : Math.floor(Date.now() / 1000) + time;
   const payload = JSON.stringify({ orbit_index, type, name });
 
   const q = db.prepare(`
@@ -135,8 +143,8 @@ router.post('/build-planet', auth, (req, res) => {
     VALUES (?, 'new_planet', ?, ?)
   `).run(sys.id, payload, completeAt);
 
-  glog(req, 'BUILD_PLANET', `Queued ${type} planet "${name}" in orbit ${orbit_index} (eta ${time}s)`, LEVELS.ACTION, { type, name, orbit_index, complete_at: completeAt, cost });
-  res.json({ message: 'Construction underway.', queue_id: q.lastInsertRowid, complete_at: completeAt, cost });
+  glog(req, 'BUILD_PLANET', `Queued ${type} planet "${name}" in orbit ${orbit_index} (eta ${isFirstFree ? 0 : time}s)${isFirstFree ? ' [FREE FIRST PLANET]' : ''}`, LEVELS.ACTION, { type, name, orbit_index, complete_at: completeAt, cost: isFirstFree ? { matter: 0, energy: 0, credits: 0 } : cost });
+  res.json({ message: isFirstFree ? 'Your first planet is free — colonising now!' : 'Construction underway.', queue_id: q.lastInsertRowid, complete_at: completeAt, cost: isFirstFree ? { matter: 0, energy: 0, credits: 0 } : cost });
 });
 
 // ── POST /api/game/upgrade-planet ────────────────────────────────────────────
@@ -455,10 +463,72 @@ router.delete('/planet/:id', auth, (req, res) => {
   if (!planet) return res.status(404).json({ error: 'Planet not found.' });
 
   db.prepare('DELETE FROM build_queue WHERE planet_id = ?').run(planetId);
+  db.prepare('DELETE FROM buildings WHERE planet_id = ?').run(planetId);
   db.prepare('DELETE FROM planets WHERE id = ?').run(planetId);
 
   glog(req, 'DESTROY_PLANET', `Destroyed ${planet.name} (${planet.type} lv${planet.level})`, LEVELS.ACTION, { planet_id: planetId, planet_name: planet.name });
   res.json({ message: `${planet.name} has been destroyed.` });
+});
+
+// ── POST /api/game/build-building ─────────────────────────────────────────────
+// Planet building slots = max(1, ceil(size_scale * 1.5)).
+// Trade center requires >= 2 player planets and costs M:500 E:300 C:200.
+const BUILDING_COSTS = {
+  trade_center: { matter: 500, energy: 300, credits: 200 },
+};
+router.post('/build-building', auth, (req, res) => {
+  const { planet_id, type } = req.body;
+  if (!BUILDING_COSTS[type]) return res.status(400).json({ error: 'Unknown building type.' });
+
+  const sys = getUserSys(req.user.id);
+  if (!sys) return res.status(404).json({ error: 'No solar system.' });
+
+  const planet = db.prepare('SELECT * FROM planets WHERE id = ? AND solar_system_id = ?').get(planet_id, sys.id);
+  if (!planet) return res.status(404).json({ error: 'Planet not found.' });
+
+  // Trade center: needs ≥ 2 planets
+  if (type === 'trade_center') {
+    const cnt = db.prepare('SELECT COUNT(*) AS cnt FROM planets WHERE solar_system_id = ?').get(sys.id).cnt;
+    if (cnt < 2) return res.status(400).json({ error: 'Trade center requires at least 2 planets.' });
+  }
+
+  // Building slot limit based on planet size
+  const maxSlots = Math.max(1, Math.ceil((planet.size_scale || 1.0) * 1.5));
+  const existingCnt = db.prepare('SELECT COUNT(*) AS cnt FROM buildings WHERE planet_id = ?').get(planet_id).cnt;
+  if (existingCnt >= maxSlots) {
+    return res.status(400).json({ error: `This planet only supports ${maxSlots} building${maxSlots !== 1 ? 's' : ''}.` });
+  }
+
+  // Deduct cost
+  const cost    = BUILDING_COSTS[type];
+  const updated = tickResources(sys.id);
+  if (updated.matter < cost.matter || updated.energy < cost.energy || updated.credits < cost.credits) {
+    return res.status(400).json({ error: `Not enough resources. Need M:${cost.matter} E:${cost.energy} C:${cost.credits}`, need: cost });
+  }
+  db.prepare('UPDATE solar_systems SET matter = matter - ?, energy = energy - ?, credits = credits - ? WHERE id = ?')
+    .run(cost.matter, cost.energy, cost.credits, sys.id);
+
+  const result = db.prepare('INSERT INTO buildings (planet_id, solar_system_id, type) VALUES (?, ?, ?)')
+    .run(planet_id, sys.id, type);
+
+  // Count total trade centers to return for ship spawning
+  const tradeCount = db.prepare("SELECT COUNT(*) AS cnt FROM buildings WHERE solar_system_id = ? AND type = 'trade_center'").get(sys.id).cnt;
+
+  glog(req, 'BUILD_BUILDING', `Built ${type} on planet ${planet.name} (id ${planet_id})`, LEVELS.ACTION, { planet_id, type });
+  res.json({ success: true, building_id: result.lastInsertRowid, trade_center_count: tradeCount });
+});
+
+// ── POST /trade-ship-visit — small passive bonus when a trade ship lands ──────
+router.post('/trade-ship-visit', auth, (req, res) => {
+  const sys = getUserSys(req.user.id);
+  if (!sys) return res.json({ ok: true });
+  // Tiny bonus: E+8..22  M+5..15  C+10..28
+  const e = 8  + Math.floor(Math.random() * 15);
+  const m = 5  + Math.floor(Math.random() * 11);
+  const c = 10 + Math.floor(Math.random() * 19);
+  db.prepare('UPDATE solar_systems SET energy = MIN(energy + ?, 999999), matter = MIN(matter + ?, 999999), credits = MIN(credits + ?, 999999) WHERE id = ?')
+    .run(e, m, c, sys.id);
+  res.json({ ok: true, bonus: { energy: e, matter: m, credits: c } });
 });
 
 module.exports = router;
